@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>新标签页 - iTab</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <!-- 背景层 -->
+  <div class="bg-layer" id="bgLayer"></div>
+  
+  <div class="container">
+    <!-- 左侧导航 -->
+    <aside class="sidebar" id="sidebar">
+      <button class="collapse-btn" id="collapseBtn" title="收起/展开">◀</button>
+      <div class="logo">
+        <span class="logo-icon" id="logoIcon">🚀</span>
+        <span class="logo-text" id="logoText">iTab</span>
+      </div>
+      <nav class="nav-menu" id="navMenu">
+        <!-- 动态生成分类菜单 -->
+      </nav>
+      <div class="sidebar-footer">
+        <button class="add-category-btn" id="addCategoryBtn"><span class="btn-icon">➕</span><span class="btn-text">添加分类</span></button>
+        <button class="settings-btn" id="settingsBtn"><span class="btn-icon">⚙️</span><span class="btn-text">设置</span></button>
+      </div>
+    </aside>
+
+    <!-- 右侧内容区 -->
+    <main class="main-content">
+      <!-- 顶部栏：时间和操作按钮 -->
+      <div class="top-bar">
+        <div class="time-section">
+          <div class="time-display" id="timeDisplay">00:00</div>
+          <div class="date-display" id="dateDisplay">1月1日 星期一</div>
+        </div>
+        <div class="header-actions">
+          <button class="icon-size-btn" id="iconSizeBtn" title="切换图标大小">🔲</button>
+          <button class="add-site-btn" id="addSiteBtn">+ 添加网站</button>
+        </div>
+      </div>
+
+      <header class="header">
+        <div class="search-box">
+          <input type="text" id="searchInput" placeholder="搜索网站..." autocomplete="off">
+          <button class="search-btn">🔍</button>
+        </div>
+      </header>
+
+      <div class="content-area" id="contentArea">
+        <!-- 动态生成网站卡片 -->
+      </div>
+    </main>
+  </div>
+
+  <!-- 右键菜单 -->
+  <div class="context-menu" id="contextMenu">
+    <div class="context-menu-item" id="menuEditSite">✏️ 编辑网站</div>
+    <div class="context-menu-item" id="menuMoveCategory">📁 移动到分类</div>
+    <div class="context-menu-item danger" id="menuDeleteSite">🗑️ 删除网站</div>
+  </div>
+
+  <!-- 设置弹窗 -->
+  <div class="modal" id="settingsModal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>设置</h3>
+        <button class="modal-close" id="closeSettingsBtn">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label>网站Logo图标</label>
+          <input type="text" id="logoIconInput" placeholder="emoji 或 图片URL">
+          <small class="form-hint">支持 emoji 或网络图片地址</small>
+        </div>
+        <div class="form-group">
+          <label>网站标题</label>
+          <input type="text" id="logoTextInput" placeholder="网站标题">
+        </div>
+        <div class="settings-divider"></div>
+        <div class="form-group">
+          <label>背景图片</label>
+          <div class="input-with-btn">
+            <input type="text" id="backgroundUrl" placeholder="输入图片URL或留空使用默认背景">
+            <button class="btn btn-secondary btn-small" id="previewBgBtn">预览</button>
+          </div>
+          <small class="form-hint">支持 jpg/png/webp 格式的图片链接</small>
+        </div>
+        <div class="form-group">
+          <label>图标大小</label>
+          <div class="radio-group">
+            <label class="radio-item">
+              <input type="radio" name="iconSize" value="normal" checked>
+              <span>正常</span>
+            </label>
+            <label class="radio-item">
+              <input type="radio" name="iconSize" value="small">
+              <span>紧凑</span>
+            </label>
+          </div>
+          <small class="form-hint">紧凑模式：只显示图标和名称，背景透明</small>
+        </div>
+        <div class="form-group">
+          <label>文字颜色</label>
+          <div class="color-picker-group">
+            <input type="color" id="textColorPicker" value="#ffffff" class="color-picker-input">
+            <div class="color-presets">
+              <button type="button" class="color-preset-btn" data-color="#ffffff" title="白色" style="background: #ffffff;"></button>
+              <button type="button" class="color-preset-btn" data-color="#000000" title="黑色" style="background: #000000;"></button>
+              <button type="button" class="color-preset-btn" data-color="#f5f5f5" title="浅灰" style="background: #f5f5f5;"></button>
+              <button type="button" class="color-preset-btn" data-color="#ffd700" title="金色" style="background: #ffd700;"></button>
+              <button type="button" class="color-preset-btn" data-color="#00ffff" title="青色" style="background: #00ffff;"></button>
+              <button type="button" class="color-preset-btn" data-color="#ff6b6b" title="红色" style="background: #ff6b6b;"></button>
+            </div>
+          </div>
+          <small class="form-hint">选择界面文字的颜色</small>
+        </div>
+        <div class="settings-divider"></div>
+        <div class="form-group">
+          <label>配置管理</label>
+          <div class="btn-group">
+            <button class="btn btn-secondary" id="exportBtn">📤 导出配置</button>
+            <button class="btn btn-secondary" id="importBtn">📥 导入配置</button>
+            <input type="file" id="importFile" accept=".json" style="display:none">
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" id="cancelSettingsBtn">关闭</button>
+        <button class="btn btn-primary" id="saveSettingsBtn">保存设置</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 分类编辑弹窗 -->
+  <div class="modal" id="categoryModal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3 id="categoryModalTitle">添加分类</h3>
+        <button class="modal-close" id="closeCategoryBtn">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label>分类名称</label>
+          <input type="text" id="categoryName" placeholder="输入分类名称">
+        </div>
+        <div class="form-group">
+          <label>图标 (emoji 或 图片URL)</label>
+          <input type="text" id="categoryIcon" placeholder="例如: 🔍 或 https://...">
+          <small class="form-hint">支持 emoji 或网络图片地址</small>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" id="cancelCategoryBtn">取消</button>
+        <button class="btn btn-primary" id="saveCategoryBtn">保存</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 网站编辑弹窗 -->
+  <div class="modal" id="siteModal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3 id="siteModalTitle">添加网站</h3>
+        <button class="modal-close" id="closeSiteBtn">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label>网站名称</label>
+          <input type="text" id="siteName" placeholder="输入网站名称">
+        </div>
+        <div class="form-group">
+          <label>网站地址</label>
+          <input type="url" id="siteUrl" placeholder="https://example.com">
+        </div>
+        <div class="form-group">
+          <label>图标 (emoji 或 URL)</label>
+          <input type="text" id="siteIcon" placeholder="🌐 或 https://...">
+        </div>
+        <div class="form-group">
+          <label>网站描述</label>
+          <textarea id="siteDesc" placeholder="简短描述" rows="2"></textarea>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" id="cancelSiteBtn">取消</button>
+        <button class="btn btn-primary" id="saveSiteBtn">保存</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 移动分类弹窗 -->
+  <div class="modal" id="moveModal">
+    <div class="modal-content modal-small">
+      <div class="modal-header">
+        <h3>移动到分类</h3>
+        <button class="modal-close" id="closeMoveBtn">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label>选择目标分类</label>
+          <select id="targetCategorySelect" class="form-select">
+            <!-- 动态生成 -->
+          </select>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" id="cancelMoveBtn">取消</button>
+        <button class="btn btn-primary" id="confirmMoveBtn">移动</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 删除确认弹窗 -->
+  <div class="modal" id="deleteModal">
+    <div class="modal-content modal-small">
+      <div class="modal-header">
+        <h3>确认删除</h3>
+        <button class="modal-close" id="closeDeleteBtn">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p id="deleteMessage">确定要删除吗？</p>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" id="cancelDeleteBtn">取消</button>
+        <button class="btn btn-danger" id="confirmDeleteBtn">删除</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="js/app.js"></script>
+</body>
+</html>
