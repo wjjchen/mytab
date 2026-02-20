@@ -1,3 +1,6 @@
+// iTab Chrome Extension - 网址导航
+// 使用 chrome.storage 替代服务器存储
+
 // 网站数据
 let sitesData = null;
 let currentCategory = null;
@@ -8,13 +11,36 @@ let sidebarCollapsed = false;
 
 // 拖拽排序相关变量
 let draggedItem = null;
-let draggedType = null; // 'category' 或 'site'
+let draggedType = null;
 
 // 右键菜单相关
-let contextMenuTarget = null; // { categoryId, siteIndex }
+let contextMenuTarget = null;
 
-// WebDAV备份定时器
-let backupTimer = null;
+// XSS 防护 - HTML 转义函数
+function escapeHtml(text) {
+  if (typeof text !== 'string') return text || '';
+  const map = {
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#039;'
+  };
+  return text.replace(/[&<>"']/g, m => map[m]);
+}
+
+// 默认数据
+const DEFAULT_DATA = {
+  settings: {
+    background: '',
+    iconSize: 'normal',
+    logoIcon: '🚀',
+    logoText: 'iTab',
+    sidebarCollapsed: false,
+    textColor: '#ffffff'
+  },
+  categories: []
+};
 
 // 初始化
 document.addEventListener('DOMContentLoaded', async () => {
@@ -22,7 +48,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   applySettings();
   renderNavMenu();
   updateTime();
-  setInterval(updateTime, 1000); // 每秒更新时间
+  setInterval(updateTime, 1000);
   
   // 恢复上次打开的分类
   const lastCategory = sitesData.settings?.lastCategory;
@@ -48,9 +74,19 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('importBtn').addEventListener('click', () => document.getElementById('importFile').click());
   document.getElementById('importFile').addEventListener('change', importConfig);
   
-  // WebDAV备份相关
-  document.getElementById('webdavSettingsBtn').addEventListener('click', openWebdavModal);
-  document.getElementById('saveWebdavBtn').addEventListener('click', saveWebdavSettings);
+  // 弹窗关闭按钮
+  document.getElementById('closeSettingsBtn')?.addEventListener('click', closeSettingsModal);
+  document.getElementById('cancelSettingsBtn')?.addEventListener('click', closeSettingsModal);
+  document.getElementById('closeCategoryBtn')?.addEventListener('click', closeCategoryModal);
+  document.getElementById('cancelCategoryBtn')?.addEventListener('click', closeCategoryModal);
+  document.getElementById('closeSiteBtn')?.addEventListener('click', closeSiteModal);
+  document.getElementById('cancelSiteBtn')?.addEventListener('click', closeSiteModal);
+  document.getElementById('closeMoveBtn')?.addEventListener('click', closeMoveModal);
+  document.getElementById('cancelMoveBtn')?.addEventListener('click', closeMoveModal);
+  document.getElementById('closeDeleteBtn')?.addEventListener('click', closeDeleteModal);
+  document.getElementById('cancelDeleteBtn')?.addEventListener('click', closeDeleteModal);
+  
+  // 右键菜单
   document.getElementById('menuEditSite').addEventListener('click', () => handleContextMenuAction('edit'));
   document.getElementById('menuMoveCategory').addEventListener('click', () => handleContextMenuAction('move'));
   document.getElementById('menuDeleteSite').addEventListener('click', () => handleContextMenuAction('delete'));
@@ -78,9 +114,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   
   // 初始化拖拽功能
   initDragAndDrop();
-  
-  // 初始化WebDAV定时备份
-  initWebdavBackup();
 });
 
 // 更新时间显示
@@ -99,20 +132,32 @@ function updateTime() {
   document.getElementById('dateDisplay').textContent = `${month}月${date}日 ${weekday}`;
 }
 
+// ========== 数据存储（使用 chrome.storage）==========
+
 // 加载网站数据
 async function loadSitesData() {
-  try {
-    const response = await fetch('/api/sites');
-    sitesData = await response.json();
-  } catch (error) {
-    console.error('加载数据失败:', error);
-    sitesData = { settings: { background: '', iconSize: 'normal', logoIcon: '🚀', logoText: 'iTab' }, categories: [] };
-  }
+  return new Promise((resolve) => {
+    chrome.storage.local.get(['itabData'], (result) => {
+      if (result.itabData) {
+        sitesData = result.itabData;
+      } else {
+        sitesData = JSON.parse(JSON.stringify(DEFAULT_DATA));
+      }
+      resolve();
+    });
+  });
+}
+
+// 保存网站数据
+async function saveSitesData() {
+  return new Promise((resolve) => {
+    chrome.storage.local.set({ itabData: sitesData }, resolve);
+  });
 }
 
 // 应用设置
 function applySettings() {
-  const settings = sitesData.settings || { background: '', iconSize: 'normal', logoIcon: '🚀', logoText: 'iTab', textColor: '#ffffff' };
+  const settings = sitesData.settings || DEFAULT_DATA.settings;
   
   // 应用背景
   const bgLayer = document.getElementById('bgLayer');
@@ -131,14 +176,19 @@ function applySettings() {
   
   const logoIconEl = document.getElementById('logoIcon');
   if (logoIcon.startsWith('http')) {
-    logoIconEl.innerHTML = `<img src="${logoIcon}" alt="Logo" onerror="this.parentElement.innerHTML='🚀'">`;
+    const img = document.createElement('img');
+    img.src = logoIcon;
+    img.alt = 'Logo';
+    img.onerror = function() {
+      this.parentElement.textContent = '🚀';
+    };
+    logoIconEl.innerHTML = '';
+    logoIconEl.appendChild(img);
   } else {
     logoIconEl.textContent = logoIcon;
   }
   document.getElementById('logoText').textContent = logoText;
-  
-  // 更新网页标题
-  document.title = logoText + ' - 网址导航';
+  document.title = logoText + ' - 新标签页';
   
   // 应用文字颜色
   const textColor = settings.textColor || '#ffffff';
@@ -157,17 +207,8 @@ function applySettings() {
 async function toggleSidebar() {
   sidebarCollapsed = !sidebarCollapsed;
   updateSidebarUI();
-  
-  // 保存状态
-  try {
-    await fetch('/api/settings', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sidebarCollapsed })
-    });
-  } catch (error) {
-    console.error('保存设置失败:', error);
-  }
+  sitesData.settings.sidebarCollapsed = sidebarCollapsed;
+  await saveSitesData();
 }
 
 // 更新侧边栏UI
@@ -199,7 +240,6 @@ function updateIconSizeUI() {
     grids.forEach(grid => grid.classList.remove('small-mode'));
   }
   
-  // 更新设置弹窗中的单选框
   const radioBtn = document.querySelector(`input[name="iconSize"][value="${currentIconSize}"]`);
   if (radioBtn) radioBtn.checked = true;
 }
@@ -208,17 +248,8 @@ function updateIconSizeUI() {
 async function toggleIconSize() {
   currentIconSize = currentIconSize === 'normal' ? 'small' : 'normal';
   updateIconSizeUI();
-  
-  // 保存设置
-  try {
-    await fetch('/api/settings', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ iconSize: currentIconSize })
-    });
-  } catch (error) {
-    console.error('保存设置失败:', error);
-  }
+  sitesData.settings.iconSize = currentIconSize;
+  await saveSitesData();
 }
 
 // 预览背景
@@ -240,7 +271,6 @@ function renderNavMenu() {
     const navItem = document.createElement('div');
     navItem.className = 'nav-item' + (currentCategory === category.id ? ' active' : '');
     navItem.dataset.categoryId = category.id;
-    // XSS 防护 - 转义分类名称
     const safeName = escapeHtml(category.name);
     navItem.innerHTML = `
       <div class="nav-item-left">
@@ -248,15 +278,23 @@ function renderNavMenu() {
         <span class="nav-text">${safeName}</span>
       </div>
       <div class="nav-item-actions">
-        <button class="nav-action-btn" onclick="event.stopPropagation(); openCategoryModal('${category.id}')" title="编辑">✏️</button>
-        <button class="nav-action-btn delete" onclick="event.stopPropagation(); deleteCategory('${category.id}')" title="删除">🗑️</button>
+        <button class="nav-action-btn edit-cat-btn" data-category-id="${category.id}" title="编辑">✏️</button>
+        <button class="nav-action-btn delete delete-cat-btn" data-category-id="${category.id}" title="删除">🗑️</button>
       </div>
     `;
     navItem.addEventListener('click', () => selectCategory(category.id));
     
-    // 添加拖拽功能
-    initCategoryDrag(navItem);
+    // 绑定编辑/删除按钮事件
+    navItem.querySelector('.edit-cat-btn').addEventListener('click', (e) => {
+      e.stopPropagation();
+      openCategoryModal(category.id);
+    });
+    navItem.querySelector('.delete-cat-btn').addEventListener('click', (e) => {
+      e.stopPropagation();
+      deleteCategory(category.id);
+    });
     
+    initCategoryDrag(navItem);
     navMenu.appendChild(navItem);
   });
 }
@@ -265,51 +303,29 @@ function renderNavMenu() {
 function getIconHtml(icon) {
   if (!icon) return '🌐';
   if (icon.startsWith('http')) {
-    return `<img src="${icon}" alt="" onerror="this.parentElement.innerHTML='🌐'">`;
+    // 返回一个占位符，图片加载后替换
+    return `<img src="${escapeHtml(icon)}" alt="" class="site-icon-img">`;
   }
   return icon;
-}
-
-// XSS 防护 - HTML 转义函数
-function escapeHtml(text) {
-  if (typeof text !== 'string') return text || '';
-  const map = {
-    '&': '&amp;',
-    '<': '&lt;',
-    '>': '&gt;',
-    '"': '&quot;',
-    "'": '&#039;'
-  };
-  return text.replace(/[&<>"']/g, m => map[m]);
 }
 
 // 选择分类
 function selectCategory(categoryId) {
   currentCategory = categoryId;
   
-  // 更新导航激活状态
   document.querySelectorAll('.nav-item').forEach(item => {
     item.classList.toggle('active', item.dataset.categoryId === categoryId);
   });
   
-  // 渲染网站卡片
   renderSites(categoryId);
-  
-  // 保存当前分类到设置
   saveCurrentCategory(categoryId);
 }
 
 // 保存当前分类
 async function saveCurrentCategory(categoryId) {
-  try {
-    await fetch('/api/settings', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ lastCategory: categoryId })
-    });
-  } catch (error) {
-    console.error('保存当前分类失败:', error);
-  }
+  if (!sitesData.settings) sitesData.settings = {};
+  sitesData.settings.lastCategory = categoryId;
+  await saveSitesData();
 }
 
 // 渲染网站卡片
@@ -334,23 +350,36 @@ function renderSites(categoryId) {
     </div>
   `;
   
-  // 初始化网站卡片拖拽和右键菜单
-  document.querySelectorAll('.site-card').forEach(card => {
+  // 初始化网站卡片拖拽、点击和右键菜单
+  document.querySelectorAll('.site-card').forEach((card) => {
+    const cardIndex = parseInt(card.dataset.siteIndex);
+    const cardCategoryId = card.dataset.categoryId;
+    
     initSiteDrag(card);
-    initSiteContextMenu(card);
+    
+    // 点击打开网站
+    card.addEventListener('click', () => {
+      const site = category.sites[cardIndex];
+      if (site) {
+        window.open(site.url, '_blank');
+      }
+    });
+    
+    // 右键菜单
+    card.addEventListener('contextmenu', (e) => showContextMenu(e, cardCategoryId, cardIndex));
   });
+  
+  updateIconSizeUI();
 }
 
 // 创建网站卡片HTML
 function createSiteCard(site, categoryId, index) {
   const iconHtml = getIconHtml(site.icon);
-  // XSS 防护 - 转义用户输入
   const safeName = escapeHtml(site.name);
   const safeDesc = escapeHtml(site.description);
-  const safeUrl = encodeURI(site.url); // URL 编码防止注入
   
   return `
-    <div class="site-card" onclick="window.open('${safeUrl}', '_blank')" data-site-index="${index}" data-category-id="${categoryId}">
+    <div class="site-card" data-site-index="${index}" data-category-id="${categoryId}">
       <div class="site-icon">${iconHtml}</div>
       <div class="site-name">${safeName}</div>
       <div class="site-desc">${safeDesc}</div>
@@ -431,61 +460,118 @@ function renderSearchResults(results, keyword) {
     });
     
     // 右键菜单
-    initSiteContextMenu(card);
+    card.addEventListener('contextmenu', (e) => {
+      const categoryId = card.dataset.categoryId;
+      const siteIndex = parseInt(card.dataset.siteIndex);
+      if (categoryId && !isNaN(siteIndex)) {
+        showContextMenu(e, categoryId, siteIndex);
+      }
+    });
   });
+}
+
+// ========== 右键菜单 ==========
+
+function showContextMenu(e, categoryId, siteIndex) {
+  e.preventDefault();
+  e.stopPropagation();
+  
+  contextMenuTarget = { categoryId, siteIndex };
+  
+  const menu = document.getElementById('contextMenu');
+  menu.style.display = 'block';
+  menu.style.left = e.pageX + 'px';
+  menu.style.top = e.pageY + 'px';
+}
+
+function hideContextMenu() {
+  document.getElementById('contextMenu').style.display = 'none';
+}
+
+async function handleContextMenuAction(action) {
+  if (!contextMenuTarget) return;
+  
+  const { categoryId, siteIndex } = contextMenuTarget;
+  hideContextMenu();
+  
+  switch (action) {
+    case 'edit':
+      openSiteModal(categoryId, siteIndex);
+      break;
+    case 'move':
+      openMoveModal(categoryId);
+      break;
+    case 'delete':
+      deleteSite(categoryId, siteIndex);
+      break;
+  }
+}
+
+function openMoveModal(categoryId) {
+  const select = document.getElementById('targetCategorySelect');
+  select.innerHTML = sitesData.categories
+    .filter(c => c.id !== categoryId)
+    .map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`)
+    .join('');
+  
+  document.getElementById('moveModal').classList.add('show');
+}
+
+function closeMoveModal() {
+  document.getElementById('moveModal').classList.remove('show');
+}
+
+async function confirmMoveSite() {
+  const targetCategoryId = document.getElementById('targetCategorySelect').value;
+  if (!targetCategoryId || !contextMenuTarget) return;
+  
+  const { categoryId, siteIndex } = contextMenuTarget;
+  
+  const sourceCategory = sitesData.categories.find(c => c.id === categoryId);
+  const targetCategory = sitesData.categories.find(c => c.id === targetCategoryId);
+  
+  if (sourceCategory && targetCategory) {
+    const site = sourceCategory.sites.splice(siteIndex, 1)[0];
+    targetCategory.sites.push(site);
+    await saveSitesData();
+    renderNavMenu();
+    selectCategory(categoryId);
+  }
+  
+  closeMoveModal();
 }
 
 // ========== 设置管理 ==========
 
 function openSettingsModal() {
   const modal = document.getElementById('settingsModal');
-  const settings = sitesData.settings || { background: '', iconSize: 'normal', logoIcon: '🚀', logoText: 'iTab', textColor: '#ffffff' };
+  const settings = sitesData.settings || DEFAULT_DATA.settings;
   
   document.getElementById('backgroundUrl').value = settings.background || '';
   document.getElementById('logoIconInput').value = settings.logoIcon || '🚀';
   document.getElementById('logoTextInput').value = settings.logoText || 'iTab';
   document.querySelector(`input[name="iconSize"][value="${settings.iconSize || 'normal'}"]`).checked = true;
   
-  // 初始化文字颜色
   const textColorPicker = document.getElementById('textColorPicker');
   textColorPicker.value = settings.textColor || '#ffffff';
   
-  // 更新预设按钮状态
   updateColorPresetButtons(settings.textColor || '#ffffff');
   
-  // 绑定颜色选择器事件
-  textColorPicker.removeEventListener('input', handleColorPickerChange);
-  textColorPicker.addEventListener('input', handleColorPickerChange);
-  
-  // 绑定预设颜色按钮事件
+  textColorPicker.addEventListener('input', (e) => updateColorPresetButtons(e.target.value));
   document.querySelectorAll('.color-preset-btn').forEach(btn => {
-    btn.removeEventListener('click', handleColorPresetClick);
-    btn.addEventListener('click', handleColorPresetClick);
+    btn.addEventListener('click', (e) => {
+      const color = e.target.dataset.color;
+      document.getElementById('textColorPicker').value = color;
+      updateColorPresetButtons(color);
+    });
   });
   
   modal.classList.add('show');
 }
 
-// 颜色选择器变化处理
-function handleColorPickerChange(e) {
-  updateColorPresetButtons(e.target.value);
-}
-
-// 预设颜色按钮点击处理
-function handleColorPresetClick(e) {
-  const color = e.target.dataset.color;
-  document.getElementById('textColorPicker').value = color;
-  updateColorPresetButtons(color);
-}
-
-// 更新预设颜色按钮状态
 function updateColorPresetButtons(activeColor) {
   document.querySelectorAll('.color-preset-btn').forEach(btn => {
-    if (btn.dataset.color === activeColor) {
-      btn.classList.add('active');
-    } else {
-      btn.classList.remove('active');
-    }
+    btn.classList.toggle('active', btn.dataset.color === activeColor);
   });
 }
 
@@ -500,31 +586,23 @@ async function saveSettings() {
   const logoText = document.getElementById('logoTextInput').value.trim() || 'iTab';
   const textColor = document.getElementById('textColorPicker').value || '#ffffff';
   
-  try {
-    const response = await fetch('/api/settings', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ background, iconSize, logoIcon, logoText, textColor })
-    });
-    
-    if (!response.ok) throw new Error('保存失败');
-    
-    await loadSitesData();
-    applySettings();
-    closeSettingsModal();
-  } catch (error) {
-    alert('保存设置失败: ' + error.message);
-  }
+  sitesData.settings = {
+    ...sitesData.settings,
+    background,
+    iconSize,
+    logoIcon,
+    logoText,
+    textColor
+  };
+  
+  await saveSitesData();
+  applySettings();
+  closeSettingsModal();
 }
 
 // 导出配置
 function exportConfig() {
-  // 深拷贝并排除敏感信息
   const exportData = JSON.parse(JSON.stringify(sitesData));
-  if (exportData.settings?.webdav) {
-    delete exportData.settings.webdav;
-  }
-  
   const dataStr = JSON.stringify(exportData, null, 2);
   const blob = new Blob([dataStr], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
@@ -550,15 +628,8 @@ async function importConfig(e) {
       throw new Error('无效的配置文件格式');
     }
     
-    const response = await fetch('/api/import', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: text
-    });
-    
-    if (!response.ok) throw new Error('导入失败');
-    
-    await loadSitesData();
+    sitesData = importData;
+    await saveSitesData();
     applySettings();
     renderNavMenu();
     
@@ -573,31 +644,6 @@ async function importConfig(e) {
   }
   
   e.target.value = '';
-}
-
-// ========== 数据备份与恢复 ==========
-
-// 创建备份
-async function createBackup() {
-  try {
-    const response = await fetch('/api/backup');
-    const data = await response.json();
-    
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-    a.download = `itab-backup-${timestamp}.json`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-    
-    alert('备份创建成功！');
-  } catch (error) {
-    alert('备份失败: ' + error.message);
-  }
 }
 
 // ========== 分类管理 ==========
@@ -635,35 +681,32 @@ async function saveCategory() {
     return;
   }
   
-  try {
-    let response;
-    if (editingCategory) {
-      response = await fetch(`/api/categories/${editingCategory}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, icon })
-      });
-    } else {
-      response = await fetch('/api/categories', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, icon })
-      });
+  if (editingCategory) {
+    const category = sitesData.categories.find(c => c.id === editingCategory);
+    if (category) {
+      category.name = name;
+      category.icon = icon;
     }
-    
-    if (!response.ok) throw new Error('保存失败');
-    
-    await loadSitesData();
-    renderNavMenu();
-    if (!editingCategory && sitesData.categories.length > 0) {
-      selectCategory(sitesData.categories[sitesData.categories.length - 1].id);
-    } else if (editingCategory) {
-      selectCategory(editingCategory);
-    }
-    closeCategoryModal();
-  } catch (error) {
-    alert('保存失败: ' + error.message);
+  } else {
+    const newCategory = {
+      id: 'cat_' + Date.now(),
+      name,
+      icon,
+      sites: []
+    };
+    sitesData.categories.push(newCategory);
   }
+  
+  await saveSitesData();
+  renderNavMenu();
+  
+  if (!editingCategory && sitesData.categories.length > 0) {
+    selectCategory(sitesData.categories[sitesData.categories.length - 1].id);
+  } else if (editingCategory) {
+    selectCategory(editingCategory);
+  }
+  
+  closeCategoryModal();
 }
 
 let deleteTarget = null;
@@ -682,9 +725,8 @@ function openSiteModal(categoryId = null, siteIndex = null) {
   const title = document.getElementById('siteModalTitle');
   
   editingSiteIndex = siteIndex;
-  
-  // 确定目标分类
   const targetCategoryId = categoryId || currentCategory;
+  
   if (!targetCategoryId) {
     alert('请先选择一个分类');
     return;
@@ -728,31 +770,21 @@ async function saveSite() {
     return;
   }
   
-  try {
-    let response;
-    if (editingSiteIndex !== null) {
-      response = await fetch(`/api/categories/${categoryId}/sites/${editingSiteIndex}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, url, icon, description })
-      });
-    } else {
-      response = await fetch(`/api/categories/${categoryId}/sites`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, url, icon, description })
-      });
-    }
-    
-    if (!response.ok) throw new Error('保存失败');
-    
-    await loadSitesData();
-    renderNavMenu();
-    selectCategory(categoryId);
-    closeSiteModal();
-  } catch (error) {
-    alert('保存失败: ' + error.message);
+  const category = sitesData.categories.find(c => c.id === categoryId);
+  if (!category) return;
+  
+  const siteData = { name, url, icon, description };
+  
+  if (editingSiteIndex !== null) {
+    category.sites[editingSiteIndex] = siteData;
+  } else {
+    category.sites.push(siteData);
   }
+  
+  await saveSitesData();
+  renderNavMenu();
+  selectCategory(categoryId);
+  closeSiteModal();
 }
 
 function deleteSite(categoryId, siteIndex) {
@@ -771,39 +803,36 @@ function closeDeleteModal() {
 async function confirmDelete() {
   if (!deleteTarget) return;
   
-  try {
-    let response;
-    if (deleteTarget.type === 'category') {
-      response = await fetch(`/api/categories/${deleteTarget.id}`, { method: 'DELETE' });
-    } else {
-      response = await fetch(`/api/categories/${deleteTarget.categoryId}/sites/${deleteTarget.siteIndex}`, { method: 'DELETE' });
+  if (deleteTarget.type === 'category') {
+    const index = sitesData.categories.findIndex(c => c.id === deleteTarget.id);
+    if (index !== -1) {
+      sitesData.categories.splice(index, 1);
     }
-    
-    if (!response.ok) throw new Error('删除失败');
-    
-    await loadSitesData();
+    await saveSitesData();
     renderNavMenu();
     
-    if (deleteTarget.type === 'category') {
-      if (sitesData.categories.length > 0) {
-        selectCategory(sitesData.categories[0].id);
-      } else {
-        currentCategory = null;
-        document.getElementById('contentArea').innerHTML = `
-          <div class="empty-state">
-            <span class="icon">📭</span>
-            <span class="text">暂无分类，请添加分类</span>
-          </div>
-        `;
-      }
+    if (sitesData.categories.length > 0) {
+      selectCategory(sitesData.categories[0].id);
     } else {
-      selectCategory(deleteTarget.categoryId);
+      currentCategory = null;
+      document.getElementById('contentArea').innerHTML = `
+        <div class="empty-state">
+          <span class="icon">📭</span>
+          <span class="text">暂无分类，请添加分类</span>
+        </div>
+      `;
     }
-    
-    closeDeleteModal();
-  } catch (error) {
-    alert('删除失败: ' + error.message);
+  } else {
+    const category = sitesData.categories.find(c => c.id === deleteTarget.categoryId);
+    if (category) {
+      category.sites.splice(deleteTarget.siteIndex, 1);
+    }
+    await saveSitesData();
+    renderNavMenu();
+    selectCategory(deleteTarget.categoryId);
   }
+  
+  closeDeleteModal();
 }
 
 // ========== 拖拽排序功能 ==========
@@ -813,7 +842,6 @@ function initDragAndDrop() {
   // 网站卡片拖拽在 renderSites 中处理
 }
 
-// 分类拖拽排序
 function initCategoryDrag(item) {
   item.draggable = true;
   
@@ -824,29 +852,21 @@ function initCategoryDrag(item) {
     e.dataTransfer.effectAllowed = 'move';
   });
   
-  item.addEventListener('dragend', () => {
+  item.addEventListener('dragend', async () => {
     item.classList.remove('dragging');
     draggedItem = null;
     draggedType = null;
-    
-    // 清除所有拖拽状态
-    document.querySelectorAll('.nav-item').forEach(i => {
-      i.classList.remove('drag-over');
-    });
+    document.querySelectorAll('.nav-item').forEach(i => i.classList.remove('drag-over'));
   });
   
   item.addEventListener('dragover', (e) => {
     e.preventDefault();
-    e.dataTransfer.dropEffect = 'move';
-    
     if (draggedType === 'category' && draggedItem !== item) {
       item.classList.add('drag-over');
     }
   });
   
-  item.addEventListener('dragleave', () => {
-    item.classList.remove('drag-over');
-  });
+  item.addEventListener('dragleave', () => item.classList.remove('drag-over'));
   
   item.addEventListener('drop', async (e) => {
     e.preventDefault();
@@ -854,47 +874,19 @@ function initCategoryDrag(item) {
     
     if (draggedType !== 'category' || draggedItem === item) return;
     
-    // 在 DOM 中移动元素
-    const navMenu = item.parentElement;
-    const allItems = Array.from(navMenu.querySelectorAll('.nav-item'));
-    const draggedIndex = allItems.indexOf(draggedItem);
-    const targetIndex = allItems.indexOf(item);
-    
-    if (draggedIndex < targetIndex) {
-      item.after(draggedItem);
-    } else {
-      item.before(draggedItem);
-    }
-    
-    // 获取新的排序
     const navItems = Array.from(document.querySelectorAll('.nav-item'));
-    const categoryIds = navItems.map(i => i.dataset.categoryId);
+    const fromIndex = navItems.indexOf(draggedItem);
+    const toIndex = navItems.indexOf(item);
     
-    // 保存排序
-    try {
-      const response = await fetch('/api/categories/reorder', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ categoryIds })
-      });
-      
-      if (response.ok) {
-        await loadSitesData();
-        // 保持当前选中状态
-        renderNavMenu();
-        if (currentCategory) {
-          selectCategory(currentCategory);
-        }
-      }
-    } catch (error) {
-      console.error('排序保存失败:', error);
-      // 恢复原顺序
+    if (fromIndex !== -1 && toIndex !== -1) {
+      const [movedCategory] = sitesData.categories.splice(fromIndex, 1);
+      sitesData.categories.splice(toIndex, 0, movedCategory);
+      await saveSitesData();
       renderNavMenu();
     }
   });
 }
 
-// 网站卡片拖拽排序
 function initSiteDrag(card) {
   card.draggable = true;
   
@@ -910,17 +902,12 @@ function initSiteDrag(card) {
     card.classList.remove('dragging');
     draggedItem = null;
     draggedType = null;
-    
-    document.querySelectorAll('.site-card').forEach(c => {
-      c.classList.remove('drag-over');
-    });
+    document.querySelectorAll('.site-card').forEach(c => c.classList.remove('drag-over'));
     e.stopPropagation();
   });
   
   card.addEventListener('dragover', (e) => {
     e.preventDefault();
-    e.dataTransfer.dropEffect = 'move';
-    
     if (draggedType === 'site' && draggedItem !== card) {
       card.classList.add('drag-over');
     }
@@ -939,329 +926,19 @@ function initSiteDrag(card) {
     
     if (draggedType !== 'site' || draggedItem === card) return;
     
-    const grid = card.parentElement;
-    const cards = Array.from(grid.querySelectorAll('.site-card'));
-    const draggedIndex = cards.indexOf(draggedItem);
-    const targetIndex = cards.indexOf(card);
-    
-    // 在 DOM 中移动元素
-    if (draggedIndex < targetIndex) {
-      card.after(draggedItem);
-    } else {
-      card.before(draggedItem);
-    }
-    
-    // 获取新的排序 - 使用网站名称和URL作为标识
-    const newCards = Array.from(grid.querySelectorAll('.site-card'));
     const categoryId = card.dataset.categoryId;
     const category = sitesData.categories.find(c => c.id === categoryId);
-    
     if (!category) return;
     
-    // 根据 DOM 顺序重建网站数组
-    const reorderedSites = [];
-    newCards.forEach(c => {
-      const siteName = c.querySelector('.site-name')?.textContent;
-      const site = category.sites.find(s => s.name === siteName);
-      if (site) reorderedSites.push(site);
-    });
+    const cards = Array.from(document.querySelectorAll('.site-card'));
+    const fromIndex = parseInt(draggedItem.dataset.siteIndex);
+    const toIndex = parseInt(card.dataset.siteIndex);
     
-    // 保存排序
-    try {
-      const response = await fetch(`/api/categories/${categoryId}/sites/reorder-full`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sites: reorderedSites })
-      });
-      
-      if (response.ok) {
-        await loadSitesData();
-        selectCategory(categoryId);
-      }
-    } catch (error) {
-      console.error('排序保存失败:', error);
+    if (fromIndex !== toIndex) {
+      const [movedSite] = category.sites.splice(fromIndex, 1);
+      category.sites.splice(toIndex, 0, movedSite);
+      await saveSitesData();
       selectCategory(categoryId);
     }
   });
-}
-
-// ========== Favicon 自动获取功能 ==========
-
-async function fetchFavicon(url) {
-  try {
-    const response = await fetch(`/api/favicon?url=${encodeURIComponent(url)}`);
-    const data = await response.json();
-    
-    if (data.favicons && data.favicons.length > 0) {
-      // 返回 Google favicon 服务作为首选（最可靠）
-      return data.favicons[3] || data.favicons[4] || data.favicons[0];
-    }
-  } catch (error) {
-    console.error('获取 favicon 失败:', error);
-  }
-  return null;
-}
-
-// 自动填充 favicon
-document.getElementById('siteUrl')?.addEventListener('blur', async function() {
-  const url = this.value.trim();
-  const iconInput = document.getElementById('siteIcon');
-  
-  // 如果已经有图标，不自动填充
-  if (iconInput.value.trim() && iconInput.value.trim() !== '🌐') {
-    return;
-  }
-  
-  if (url) {
-    const favicon = await fetchFavicon(url);
-    if (favicon) {
-      iconInput.value = favicon;
-    }
-  }
-});
-
-// ========== 右键菜单功能 ==========
-
-// 初始化网站卡片右键菜单
-function initSiteContextMenu(card) {
-  card.addEventListener('contextmenu', (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    
-    const categoryId = card.dataset.categoryId;
-    const siteIndex = parseInt(card.dataset.siteIndex);
-    
-    contextMenuTarget = { categoryId, siteIndex };
-    
-    const menu = document.getElementById('contextMenu');
-    menu.style.left = e.pageX + 'px';
-    menu.style.top = e.pageY + 'px';
-    menu.classList.add('show');
-  });
-}
-
-// 隐藏右键菜单
-function hideContextMenu() {
-  document.getElementById('contextMenu').classList.remove('show');
-}
-
-// 处理右键菜单操作
-function handleContextMenuAction(action) {
-  if (!contextMenuTarget) return;
-  
-  const { categoryId, siteIndex } = contextMenuTarget;
-  hideContextMenu();
-  
-  switch (action) {
-    case 'edit':
-      openSiteModal(categoryId, siteIndex);
-      break;
-    case 'move':
-      openMoveCategoryModal(categoryId, siteIndex);
-      break;
-    case 'delete':
-      deleteSite(categoryId, siteIndex);
-      break;
-  }
-}
-
-// ========== 移动网站到其他分类 ==========
-
-// 打开移动分类弹窗
-function openMoveCategoryModal(categoryId, siteIndex) {
-  const modal = document.getElementById('moveCategoryModal');
-  const select = document.getElementById('targetCategorySelect');
-  
-  // 填充分类选项
-  select.innerHTML = sitesData.categories
-    .filter(c => c.id !== categoryId)
-    .map(c => `<option value="${c.id}">${c.name}</option>`)
-    .join('');
-  
-  if (select.options.length === 0) {
-    alert('没有其他分类可移动');
-    return;
-  }
-  
-  contextMenuTarget = { categoryId, siteIndex };
-  modal.classList.add('show');
-}
-
-function closeMoveCategoryModal() {
-  document.getElementById('moveCategoryModal').classList.remove('show');
-}
-
-// 确认移动网站
-async function confirmMoveSite() {
-  if (!contextMenuTarget) return;
-  
-  const { categoryId, siteIndex } = contextMenuTarget;
-  const targetCategoryId = document.getElementById('targetCategorySelect').value;
-  
-  if (!targetCategoryId) {
-    alert('请选择目标分类');
-    return;
-  }
-  
-  try {
-    const response = await fetch(`/api/categories/${categoryId}/sites/${siteIndex}/move`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ targetCategoryId })
-    });
-    
-    if (!response.ok) throw new Error('移动失败');
-    
-    await loadSitesData();
-    renderNavMenu();
-    selectCategory(categoryId);
-    closeMoveCategoryModal();
-  } catch (error) {
-    alert('移动失败: ' + error.message);
-  }
-}
-
-// ========== WebDAV 备份功能 ==========
-
-// 初始化 WebDAV 定时备份
-function initWebdavBackup() {
-  if (backupTimer) {
-    clearInterval(backupTimer);
-    backupTimer = null;
-  }
-  
-  const webdav = sitesData.settings?.webdav;
-  if (webdav && webdav.interval > 0) {
-    backupTimer = setInterval(() => {
-      autoBackup();
-    }, webdav.interval * 60 * 1000);
-  }
-}
-
-// 打开 WebDAV 设置弹窗
-function openWebdavModal() {
-  const modal = document.getElementById('webdavModal');
-  const webdav = sitesData.settings?.webdav || {};
-  
-  document.getElementById('webdavUrl').value = webdav.url || '';
-  document.getElementById('webdavUsername').value = webdav.username || '';
-  document.getElementById('webdavPassword').value = webdav.password || '';
-  document.getElementById('webdavPath').value = webdav.path || '/itab-backup/';
-  document.getElementById('backupInterval').value = webdav.interval || 0;
-  
-  updateBackupStatus();
-  modal.classList.add('show');
-}
-
-function closeWebdavModal() {
-  document.getElementById('webdavModal').classList.remove('show');
-}
-
-// 更新备份状态显示
-function updateBackupStatus() {
-  const statusEl = document.getElementById('backupStatus');
-  const webdav = sitesData.settings?.webdav;
-  
-  if (!webdav || !webdav.url) {
-    statusEl.innerHTML = '<span style="color:#999;">未配置</span>';
-    return;
-  }
-  
-  const lastBackup = webdav.lastBackup;
-  if (lastBackup) {
-    const date = new Date(lastBackup);
-    statusEl.innerHTML = `<span style="color:#4caf50;">✓ 上次备份: ${date.toLocaleString()}</span>`;
-  } else {
-    statusEl.innerHTML = '<span style="color:#ff9800;">已配置，等待备份</span>';
-  }
-}
-
-// 保存 WebDAV 设置
-async function saveWebdavSettings() {
-  const webdav = {
-    url: document.getElementById('webdavUrl').value.trim(),
-    username: document.getElementById('webdavUsername').value.trim(),
-    password: document.getElementById('webdavPassword').value,
-    path: document.getElementById('webdavPath').value.trim() || '/itab-backup/',
-    interval: parseInt(document.getElementById('backupInterval').value)
-  };
-  
-  try {
-    const response = await fetch('/api/settings', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ webdav })
-    });
-    
-    if (!response.ok) throw new Error('保存失败');
-    
-    await loadSitesData();
-    initWebdavBackup();
-    updateBackupStatus();
-    closeWebdavModal();
-    alert('WebDAV 设置已保存');
-  } catch (error) {
-    alert('保存失败: ' + error.message);
-  }
-}
-
-// 测试 WebDAV 连接
-async function testWebdavConnection() {
-  const webdav = {
-    url: document.getElementById('webdavUrl').value.trim(),
-    username: document.getElementById('webdavUsername').value.trim(),
-    password: document.getElementById('webdavPassword').value,
-    path: document.getElementById('webdavPath').value.trim() || '/itab-backup/'
-  };
-  
-  if (!webdav.url) {
-    alert('请输入 WebDAV 服务器地址');
-    return;
-  }
-  
-  try {
-    const response = await fetch('/api/webdav/test', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(webdav)
-    });
-    
-    const result = await response.json();
-    
-    if (result.success) {
-      alert('✓ 连接成功！');
-    } else {
-      alert('✗ 连接失败: ' + (result.error || '未知错误'));
-    }
-  } catch (error) {
-    alert('连接测试失败: ' + error.message);
-  }
-}
-
-// 手动备份
-async function manualBackup() {
-  try {
-    const response = await fetch('/api/webdav/backup', { method: 'POST' });
-    const result = await response.json();
-    
-    if (result.success) {
-      await loadSitesData();
-      updateBackupStatus();
-      alert('备份成功！');
-    } else {
-      alert('备份失败: ' + (result.error || '未知错误'));
-    }
-  } catch (error) {
-    alert('备份失败: ' + error.message);
-  }
-}
-
-// 自动备份（静默执行）
-async function autoBackup() {
-  try {
-    await fetch('/api/webdav/backup', { method: 'POST' });
-    await loadSitesData();
-  } catch (error) {
-    console.error('自动备份失败:', error);
-  }
 }
