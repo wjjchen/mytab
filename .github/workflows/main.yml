@@ -35,4 +35,4 @@ jobs:
           push: true
           tags: |
             ${{ secrets.DOCKERHUB_USERNAME }}/mytab:latest
-            ${{ secrets.DOCKERHUB_USERNAME }}/mytab:${{ github.sha }}
+            ${{ secrets.DOCKERHUB_USERNAME }}/mytab:${{ github.ref_name }}
