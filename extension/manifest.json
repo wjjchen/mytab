@@ -10,7 +10,8 @@
   ],
   "host_permissions": [
     "https://www.google.com/*",
-    "https://favicon.im/*"
+    "https://favicon.im/*",
+    "*://*/*"
   ],
   "chrome_url_overrides": {
     "newtab": "index.html"

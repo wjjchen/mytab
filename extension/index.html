@@ -140,10 +140,61 @@
             <input type="file" id="importFile" accept=".json" style="display:none">
           </div>
         </div>
+        <div class="form-group">
+          <label>WebDAV 云同步</label>
+          <div class="btn-group">
+            <button class="btn btn-secondary" id="webdavSettingsBtn">☁️ 配置云同步</button>
+          </div>
+          <small class="form-hint">支持坚果云、Nextcloud 等 WebDAV 服务</small>
+        </div>
       </div>
       <div class="modal-footer">
         <button class="btn btn-secondary" id="cancelSettingsBtn">关闭</button>
         <button class="btn btn-primary" id="saveSettingsBtn">保存设置</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- WebDAV 设置弹窗 -->
+  <div class="modal" id="webdavModal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>WebDAV 云同步设置</h3>
+        <button class="modal-close" id="closeWebdavBtn">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label>WebDAV 服务器地址</label>
+          <input type="url" id="webdavUrl" placeholder="https://dav.example.com/">
+          <small class="form-hint">例如: https://dav.jianguoyun.com/dav/</small>
+        </div>
+        <div class="form-group">
+          <label>用户名</label>
+          <input type="text" id="webdavUsername" placeholder="WebDAV 用户名">
+        </div>
+        <div class="form-group">
+          <label>密码/应用密码</label>
+          <input type="password" id="webdavPassword" placeholder="WebDAV 密码">
+          <small class="form-hint">坚果云等平台需要使用应用密码</small>
+        </div>
+        <div class="form-group">
+          <label>备份目录</label>
+          <input type="text" id="webdavPath" placeholder="/itab-backup/">
+          <small class="form-hint">备份文件保存的目录路径</small>
+        </div>
+        <div class="settings-divider"></div>
+        <div class="form-group">
+          <label>同步状态</label>
+          <div id="webdavStatus" style="font-size:14px;color:#666;">
+            未配置
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" id="testWebdavBtn">测试连接</button>
+        <button class="btn btn-secondary" id="uploadToWebdavBtn">上传配置</button>
+        <button class="btn btn-secondary" id="downloadFromWebdavBtn">下载配置</button>
+        <button class="btn btn-primary" id="saveWebdavBtn">保存设置</button>
       </div>
     </div>
   </div>
