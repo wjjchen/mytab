@@ -16,6 +16,88 @@ let draggedType = null;
 // 右键菜单相关
 let contextMenuTarget = null;
 
+// 加密密钥（基于扩展ID生成）
+let encryptionKey = null;
+
+// 初始化加密密钥
+async function initEncryptionKey() {
+  if (encryptionKey) return encryptionKey;
+  
+  // 使用 Chrome 扩展的 ID 作为密钥种子
+  const extensionId = chrome.runtime.id;
+  // 生成一个 32 字节的密钥
+  const encoder = new TextEncoder();
+  const data = encoder.encode(extensionId + '-itab-webdav-key');
+  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+  encryptionKey = await crypto.subtle.importKey(
+    'raw',
+    hashBuffer,
+    { name: 'AES-GCM' },
+    false,
+    ['encrypt', 'decrypt']
+  );
+  return encryptionKey;
+}
+
+// 加密文本
+async function encryptText(text) {
+  if (!text) return text;
+  
+  try {
+    const key = await initEncryptionKey();
+    const encoder = new TextEncoder();
+    const data = encoder.encode(text);
+    
+    // 生成随机 IV
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    
+    const encrypted = await crypto.subtle.encrypt(
+      { name: 'AES-GCM', iv: iv },
+      key,
+      data
+    );
+    
+    // 将 IV 和加密数据合并，并用 base64 编码
+    const combined = new Uint8Array(iv.length + encrypted.byteLength);
+    combined.set(iv);
+    combined.set(new Uint8Array(encrypted), iv.length);
+    
+    return btoa(String.fromCharCode(...combined));
+  } catch (error) {
+    console.error('加密失败:', error);
+    return text;
+  }
+}
+
+// 解密文本
+async function decryptText(encryptedText) {
+  if (!encryptedText) return encryptedText;
+  
+  // 检查是否是加密数据（尝试解密）
+  try {
+    const key = await initEncryptionKey();
+    
+    // Base64 解码
+    const combined = Uint8Array.from(atob(encryptedText), c => c.charCodeAt(0));
+    
+    // 提取 IV 和加密数据
+    const iv = combined.slice(0, 12);
+    const data = combined.slice(12);
+    
+    const decrypted = await crypto.subtle.decrypt(
+      { name: 'AES-GCM', iv: iv },
+      key,
+      data
+    );
+    
+    const decoder = new TextDecoder();
+    return decoder.decode(decrypted);
+  } catch (error) {
+    // 如果解密失败，可能是未加密的旧数据，直接返回
+    return encryptedText;
+  }
+}
+
 // XSS 防护 - HTML 转义函数
 function escapeHtml(text) {
   if (typeof text !== 'string') return text || '';
@@ -655,7 +737,12 @@ async function saveSettings() {
 
 // 导出配置
 function exportConfig() {
+  // 深拷贝并排除敏感信息
   const exportData = JSON.parse(JSON.stringify(sitesData));
+  if (exportData.settings?.webdav) {
+    delete exportData.settings.webdav;
+  }
+  
   const dataStr = JSON.stringify(exportData, null, 2);
   const blob = new Blob([dataStr], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
@@ -702,13 +789,16 @@ async function importConfig(e) {
 // ========== WebDAV 云同步功能 ==========
 
 // 打开 WebDAV 设置弹窗
-function openWebdavModal() {
+async function openWebdavModal() {
   const modal = document.getElementById('webdavModal');
   const webdavConfig = sitesData.settings?.webdav || {};
   
+  // 解密密码
+  const decryptedPassword = webdavConfig.password ? await decryptText(webdavConfig.password) : '';
+  
   document.getElementById('webdavUrl').value = webdavConfig.url || '';
   document.getElementById('webdavUsername').value = webdavConfig.username || '';
-  document.getElementById('webdavPassword').value = webdavConfig.password || '';
+  document.getElementById('webdavPassword').value = decryptedPassword;
   document.getElementById('webdavPath').value = webdavConfig.path || '/itab-backup/';
   
   updateWebdavStatus();
@@ -750,11 +840,14 @@ async function saveWebdavConfig() {
     return;
   }
   
+  // 加密密码
+  const encryptedPassword = await encryptText(password);
+  
   sitesData.settings = sitesData.settings || {};
   sitesData.settings.webdav = {
     url: url.endsWith('/') ? url : url + '/',
     username,
-    password,
+    password: encryptedPassword,
     path: path.startsWith('/') ? path : '/' + path,
     lastSync: sitesData.settings.webdav?.lastSync
   };
@@ -762,6 +855,19 @@ async function saveWebdavConfig() {
   await saveSitesData();
   updateWebdavStatus();
   alert('WebDAV 设置已保存');
+}
+
+// 获取解密后的 WebDAV 凭证
+async function getWebdavCredentials() {
+  const webdavConfig = sitesData.settings?.webdav;
+  if (!webdavConfig) return null;
+  
+  return {
+    url: webdavConfig.url,
+    username: webdavConfig.username,
+    password: webdavConfig.password ? await decryptText(webdavConfig.password) : '',
+    path: webdavConfig.path
+  };
 }
 
 // 测试 WebDAV 连接
@@ -803,9 +909,9 @@ async function testWebdavConnection() {
 
 // 上传配置到 WebDAV
 async function uploadToWebdav() {
-  const webdavConfig = sitesData.settings?.webdav;
+  const credentials = await getWebdavCredentials();
   
-  if (!webdavConfig || !webdavConfig.url) {
+  if (!credentials || !credentials.url) {
     alert('请先配置 WebDAV 设置');
     return;
   }
@@ -814,19 +920,28 @@ async function uploadToWebdav() {
   statusEl.innerHTML = '<span style="color:#667eea;">正在上传配置...</span>';
   
   try {
-    const configPath = webdavConfig.path + 'itab-config.json';
-    const configUrl = webdavConfig.url + configPath.replace(/^\/+/, '');
+    // 生成带时间戳的文件名
+    const now = new Date();
+    const timestamp = now.toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    const configPath = credentials.path + `itab-config-${timestamp}.json`;
+    const configUrl = credentials.url + configPath.replace(/^\/+/, '');
     
     // 先确保目录存在
-    await ensureWebdavDirectory(webdavConfig);
+    await ensureWebdavDirectory(credentials);
+    
+    // 深拷贝并排除 webdav 配置项
+    const uploadData = JSON.parse(JSON.stringify(sitesData));
+    if (uploadData.settings?.webdav) {
+      delete uploadData.settings.webdav;
+    }
     
     const response = await fetch(configUrl, {
       method: 'PUT',
       headers: {
-        'Authorization': 'Basic ' + btoa(webdavConfig.username + ':' + webdavConfig.password),
+        'Authorization': 'Basic ' + btoa(credentials.username + ':' + credentials.password),
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify(sitesData, null, 2)
+      body: JSON.stringify(uploadData, null, 2)
     });
     
     if (response.ok || response.status === 201 || response.status === 204) {
@@ -843,16 +958,16 @@ async function uploadToWebdav() {
 }
 
 // 确保 WebDAV 目录存在
-async function ensureWebdavDirectory(config) {
-  const dirPath = config.path.replace(/^\/+/, '').replace(/\/+$/, '');
-  const dirUrl = config.url + dirPath + '/';
+async function ensureWebdavDirectory(credentials) {
+  const dirPath = credentials.path.replace(/^\/+/, '').replace(/\/+$/, '');
+  const dirUrl = credentials.url + dirPath + '/';
   
   try {
     // 尝试创建目录（如果已存在会返回错误，但不影响）
     await fetch(dirUrl, {
       method: 'MKCOL',
       headers: {
-        'Authorization': 'Basic ' + btoa(config.username + ':' + config.password)
+        'Authorization': 'Basic ' + btoa(credentials.username + ':' + credentials.password)
       }
     });
   } catch (e) {
@@ -862,9 +977,9 @@ async function ensureWebdavDirectory(config) {
 
 // 从 WebDAV 下载配置
 async function downloadFromWebdav() {
-  const webdavConfig = sitesData.settings?.webdav;
+  const credentials = await getWebdavCredentials();
   
-  if (!webdavConfig || !webdavConfig.url) {
+  if (!credentials || !credentials.url) {
     alert('请先配置 WebDAV 设置');
     return;
   }
@@ -873,13 +988,13 @@ async function downloadFromWebdav() {
   statusEl.innerHTML = '<span style="color:#667eea;">正在下载配置...</span>';
   
   try {
-    const configPath = webdavConfig.path + 'itab-config.json';
-    const configUrl = webdavConfig.url + configPath.replace(/^\/+/, '');
+    const configPath = credentials.path + 'itab-config.json';
+    const configUrl = credentials.url + configPath.replace(/^\/+/, '');
     
     const response = await fetch(configUrl, {
       method: 'GET',
       headers: {
-        'Authorization': 'Basic ' + btoa(webdavConfig.username + ':' + webdavConfig.password)
+        'Authorization': 'Basic ' + btoa(credentials.username + ':' + credentials.password)
       }
     });
     
@@ -890,9 +1005,12 @@ async function downloadFromWebdav() {
         throw new Error('无效的配置文件格式');
       }
       
+      // 保留当前 WebDAV 配置
+      const currentWebdavConfig = sitesData.settings?.webdav;
+      
       sitesData = importData;
       sitesData.settings = sitesData.settings || {};
-      sitesData.settings.webdav = webdavConfig;
+      sitesData.settings.webdav = currentWebdavConfig;
       sitesData.settings.webdav.lastSync = new Date().toISOString();
       
       await saveSitesData();
