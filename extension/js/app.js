@@ -75,6 +75,14 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('importBtn').addEventListener('click', () => document.getElementById('importFile').click());
   document.getElementById('importFile').addEventListener('change', importConfig);
   
+  // WebDAV 相关
+  document.getElementById('webdavSettingsBtn')?.addEventListener('click', openWebdavModal);
+  document.getElementById('closeWebdavBtn')?.addEventListener('click', closeWebdavModal);
+  document.getElementById('testWebdavBtn')?.addEventListener('click', testWebdavConnection);
+  document.getElementById('uploadToWebdavBtn')?.addEventListener('click', uploadToWebdav);
+  document.getElementById('downloadFromWebdavBtn')?.addEventListener('click', downloadFromWebdav);
+  document.getElementById('saveWebdavBtn')?.addEventListener('click', saveWebdavConfig);
+  
   // 弹窗关闭按钮
   document.getElementById('closeSettingsBtn')?.addEventListener('click', closeSettingsModal);
   document.getElementById('cancelSettingsBtn')?.addEventListener('click', closeSettingsModal);
@@ -689,6 +697,222 @@ async function importConfig(e) {
   }
   
   e.target.value = '';
+}
+
+// ========== WebDAV 云同步功能 ==========
+
+// 打开 WebDAV 设置弹窗
+function openWebdavModal() {
+  const modal = document.getElementById('webdavModal');
+  const webdavConfig = sitesData.settings?.webdav || {};
+  
+  document.getElementById('webdavUrl').value = webdavConfig.url || '';
+  document.getElementById('webdavUsername').value = webdavConfig.username || '';
+  document.getElementById('webdavPassword').value = webdavConfig.password || '';
+  document.getElementById('webdavPath').value = webdavConfig.path || '/itab-backup/';
+  
+  updateWebdavStatus();
+  
+  modal.classList.add('show');
+}
+
+// 关闭 WebDAV 设置弹窗
+function closeWebdavModal() {
+  document.getElementById('webdavModal').classList.remove('show');
+}
+
+// 更新 WebDAV 状态显示
+function updateWebdavStatus() {
+  const statusEl = document.getElementById('webdavStatus');
+  const webdavConfig = sitesData.settings?.webdav;
+  
+  if (webdavConfig && webdavConfig.url && webdavConfig.username) {
+    const lastSync = webdavConfig.lastSync;
+    if (lastSync) {
+      statusEl.innerHTML = `<span style="color:#00b894;">✓ 已配置</span><br><small>上次同步: ${new Date(lastSync).toLocaleString()}</small>`;
+    } else {
+      statusEl.innerHTML = `<span style="color:#00b894;">✓ 已配置</span><br><small>尚未同步</small>`;
+    }
+  } else {
+    statusEl.innerHTML = '未配置';
+  }
+}
+
+// 保存 WebDAV 设置
+async function saveWebdavConfig() {
+  const url = document.getElementById('webdavUrl').value.trim();
+  const username = document.getElementById('webdavUsername').value.trim();
+  const password = document.getElementById('webdavPassword').value;
+  const path = document.getElementById('webdavPath').value.trim() || '/itab-backup/';
+  
+  if (!url || !username || !password) {
+    alert('请填写完整的 WebDAV 配置信息');
+    return;
+  }
+  
+  sitesData.settings = sitesData.settings || {};
+  sitesData.settings.webdav = {
+    url: url.endsWith('/') ? url : url + '/',
+    username,
+    password,
+    path: path.startsWith('/') ? path : '/' + path,
+    lastSync: sitesData.settings.webdav?.lastSync
+  };
+  
+  await saveSitesData();
+  updateWebdavStatus();
+  alert('WebDAV 设置已保存');
+}
+
+// 测试 WebDAV 连接
+async function testWebdavConnection() {
+  const url = document.getElementById('webdavUrl').value.trim();
+  const username = document.getElementById('webdavUsername').value.trim();
+  const password = document.getElementById('webdavPassword').value;
+  
+  if (!url || !username || !password) {
+    alert('请填写完整的 WebDAV 配置信息');
+    return;
+  }
+  
+  const statusEl = document.getElementById('webdavStatus');
+  statusEl.innerHTML = '<span style="color:#667eea;">正在测试连接...</span>';
+  
+  try {
+    const response = await fetch(url, {
+      method: 'PROPFIND',
+      headers: {
+        'Authorization': 'Basic ' + btoa(username + ':' + password),
+        'Depth': '0',
+        'Content-Type': 'application/xml'
+      },
+      body: '<?xml version="1.0" encoding="utf-8"?><propfind xmlns="DAV:"><prop></prop></propfind>'
+    });
+    
+    if (response.ok || response.status === 207) {
+      statusEl.innerHTML = '<span style="color:#00b894;">✓ 连接成功</span>';
+    } else if (response.status === 401) {
+      statusEl.innerHTML = '<span style="color:#e74c3c;">✗ 认证失败，请检查用户名和密码</span>';
+    } else {
+      statusEl.innerHTML = `<span style="color:#e74c3c;">✗ 连接失败: ${response.status}</span>`;
+    }
+  } catch (error) {
+    statusEl.innerHTML = `<span style="color:#e74c3c;">✗ 连接失败: ${error.message}</span>`;
+  }
+}
+
+// 上传配置到 WebDAV
+async function uploadToWebdav() {
+  const webdavConfig = sitesData.settings?.webdav;
+  
+  if (!webdavConfig || !webdavConfig.url) {
+    alert('请先配置 WebDAV 设置');
+    return;
+  }
+  
+  const statusEl = document.getElementById('webdavStatus');
+  statusEl.innerHTML = '<span style="color:#667eea;">正在上传配置...</span>';
+  
+  try {
+    const configPath = webdavConfig.path + 'itab-config.json';
+    const configUrl = webdavConfig.url + configPath.replace(/^\/+/, '');
+    
+    // 先确保目录存在
+    await ensureWebdavDirectory(webdavConfig);
+    
+    const response = await fetch(configUrl, {
+      method: 'PUT',
+      headers: {
+        'Authorization': 'Basic ' + btoa(webdavConfig.username + ':' + webdavConfig.password),
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(sitesData, null, 2)
+    });
+    
+    if (response.ok || response.status === 201 || response.status === 204) {
+      sitesData.settings.webdav.lastSync = new Date().toISOString();
+      await saveSitesData();
+      statusEl.innerHTML = '<span style="color:#00b894;">✓ 上传成功</span>';
+      updateWebdavStatus();
+    } else {
+      throw new Error(`上传失败: ${response.status}`);
+    }
+  } catch (error) {
+    statusEl.innerHTML = `<span style="color:#e74c3c;">✗ 上传失败: ${error.message}</span>`;
+  }
+}
+
+// 确保 WebDAV 目录存在
+async function ensureWebdavDirectory(config) {
+  const dirPath = config.path.replace(/^\/+/, '').replace(/\/+$/, '');
+  const dirUrl = config.url + dirPath + '/';
+  
+  try {
+    // 尝试创建目录（如果已存在会返回错误，但不影响）
+    await fetch(dirUrl, {
+      method: 'MKCOL',
+      headers: {
+        'Authorization': 'Basic ' + btoa(config.username + ':' + config.password)
+      }
+    });
+  } catch (e) {
+    // 忽略错误，目录可能已存在
+  }
+}
+
+// 从 WebDAV 下载配置
+async function downloadFromWebdav() {
+  const webdavConfig = sitesData.settings?.webdav;
+  
+  if (!webdavConfig || !webdavConfig.url) {
+    alert('请先配置 WebDAV 设置');
+    return;
+  }
+  
+  const statusEl = document.getElementById('webdavStatus');
+  statusEl.innerHTML = '<span style="color:#667eea;">正在下载配置...</span>';
+  
+  try {
+    const configPath = webdavConfig.path + 'itab-config.json';
+    const configUrl = webdavConfig.url + configPath.replace(/^\/+/, '');
+    
+    const response = await fetch(configUrl, {
+      method: 'GET',
+      headers: {
+        'Authorization': 'Basic ' + btoa(webdavConfig.username + ':' + webdavConfig.password)
+      }
+    });
+    
+    if (response.ok) {
+      const importData = await response.json();
+      
+      if (!importData.categories || !Array.isArray(importData.categories)) {
+        throw new Error('无效的配置文件格式');
+      }
+      
+      sitesData = importData;
+      sitesData.settings = sitesData.settings || {};
+      sitesData.settings.webdav = webdavConfig;
+      sitesData.settings.webdav.lastSync = new Date().toISOString();
+      
+      await saveSitesData();
+      applySettings();
+      renderNavMenu();
+      
+      if (sitesData.categories.length > 0) {
+        selectCategory(sitesData.categories[0].id);
+      }
+      
+      statusEl.innerHTML = '<span style="color:#00b894;">✓ 下载成功</span>';
+      updateWebdavStatus();
+    } else if (response.status === 404) {
+      statusEl.innerHTML = '<span style="color:#e74c3c;">✗ 远程配置文件不存在，请先上传</span>';
+    } else {
+      throw new Error(`下载失败: ${response.status}`);
+    }
+  } catch (error) {
+    statusEl.innerHTML = `<span style="color:#e74c3c;">✗ 下载失败: ${error.message}</span>`;
+  }
 }
 
 // ========== 分类管理 ==========
