@@ -10,6 +10,12 @@ let sidebarCollapsed = false;
 let draggedItem = null;
 let draggedType = null; // 'category' 或 'site'
 
+// 右键菜单相关
+let contextMenuTarget = null; // { categoryId, siteIndex }
+
+// WebDAV备份定时器
+let backupTimer = null;
+
 // 初始化
 document.addEventListener('DOMContentLoaded', async () => {
   await loadSitesData();
@@ -18,8 +24,11 @@ document.addEventListener('DOMContentLoaded', async () => {
   updateTime();
   setInterval(updateTime, 1000); // 每秒更新时间
   
-  // 默认选中第一个分类
-  if (sitesData.categories.length > 0) {
+  // 恢复上次打开的分类
+  const lastCategory = sitesData.settings?.lastCategory;
+  if (lastCategory && sitesData.categories.find(c => c.id === lastCategory)) {
+    selectCategory(lastCategory);
+  } else if (sitesData.categories.length > 0) {
     selectCategory(sitesData.categories[0].id);
   }
 
@@ -38,9 +47,14 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('exportBtn').addEventListener('click', exportConfig);
   document.getElementById('importBtn').addEventListener('click', () => document.getElementById('importFile').click());
   document.getElementById('importFile').addEventListener('change', importConfig);
-  document.getElementById('backupBtn').addEventListener('click', createBackup);
-  document.getElementById('restoreBtn').addEventListener('click', () => document.getElementById('restoreFile').click());
-  document.getElementById('restoreFile').addEventListener('change', restoreBackup);
+  
+  // WebDAV备份相关
+  document.getElementById('webdavSettingsBtn').addEventListener('click', openWebdavModal);
+  document.getElementById('saveWebdavBtn').addEventListener('click', saveWebdavSettings);
+  document.getElementById('menuEditSite').addEventListener('click', () => handleContextMenuAction('edit'));
+  document.getElementById('menuMoveCategory').addEventListener('click', () => handleContextMenuAction('move'));
+  document.getElementById('menuDeleteSite').addEventListener('click', () => handleContextMenuAction('delete'));
+  document.getElementById('confirmMoveBtn').addEventListener('click', confirmMoveSite);
   
   // 侧边栏收起按钮
   document.getElementById('collapseBtn').addEventListener('click', toggleSidebar);
@@ -54,8 +68,19 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   });
   
+  // 点击其他地方隐藏右键菜单
+  document.addEventListener('click', hideContextMenu);
+  document.addEventListener('contextmenu', (e) => {
+    if (!e.target.closest('.site-card')) {
+      hideContextMenu();
+    }
+  });
+  
   // 初始化拖拽功能
   initDragAndDrop();
+  
+  // 初始化WebDAV定时备份
+  initWebdavBackup();
 });
 
 // 更新时间显示
@@ -215,10 +240,12 @@ function renderNavMenu() {
     const navItem = document.createElement('div');
     navItem.className = 'nav-item' + (currentCategory === category.id ? ' active' : '');
     navItem.dataset.categoryId = category.id;
+    // XSS 防护 - 转义分类名称
+    const safeName = escapeHtml(category.name);
     navItem.innerHTML = `
       <div class="nav-item-left">
         <span class="nav-icon">${getIconHtml(category.icon)}</span>
-        <span class="nav-text">${category.name}</span>
+        <span class="nav-text">${safeName}</span>
       </div>
       <div class="nav-item-actions">
         <button class="nav-action-btn" onclick="event.stopPropagation(); openCategoryModal('${category.id}')" title="编辑">✏️</button>
@@ -243,6 +270,19 @@ function getIconHtml(icon) {
   return icon;
 }
 
+// XSS 防护 - HTML 转义函数
+function escapeHtml(text) {
+  if (typeof text !== 'string') return text || '';
+  const map = {
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#039;'
+  };
+  return text.replace(/[&<>"']/g, m => map[m]);
+}
+
 // 选择分类
 function selectCategory(categoryId) {
   currentCategory = categoryId;
@@ -254,6 +294,22 @@ function selectCategory(categoryId) {
   
   // 渲染网站卡片
   renderSites(categoryId);
+  
+  // 保存当前分类到设置
+  saveCurrentCategory(categoryId);
+}
+
+// 保存当前分类
+async function saveCurrentCategory(categoryId) {
+  try {
+    await fetch('/api/settings', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ lastCategory: categoryId })
+    });
+  } catch (error) {
+    console.error('保存当前分类失败:', error);
+  }
 }
 
 // 渲染网站卡片
@@ -278,25 +334,26 @@ function renderSites(categoryId) {
     </div>
   `;
   
-  // 初始化网站卡片拖拽
+  // 初始化网站卡片拖拽和右键菜单
   document.querySelectorAll('.site-card').forEach(card => {
     initSiteDrag(card);
+    initSiteContextMenu(card);
   });
 }
 
 // 创建网站卡片HTML
 function createSiteCard(site, categoryId, index) {
   const iconHtml = getIconHtml(site.icon);
+  // XSS 防护 - 转义用户输入
+  const safeName = escapeHtml(site.name);
+  const safeDesc = escapeHtml(site.description);
+  const safeUrl = encodeURI(site.url); // URL 编码防止注入
   
   return `
-    <div class="site-card" onclick="window.open('${site.url}', '_blank')" data-site-index="${index}" data-category-id="${categoryId}">
-      <div class="site-card-actions">
-        <button class="card-action-btn" onclick="event.stopPropagation(); openSiteModal('${categoryId}', ${index})" title="编辑">✏️</button>
-        <button class="card-action-btn delete" onclick="event.stopPropagation(); deleteSite('${categoryId}', ${index})" title="删除">🗑️</button>
-      </div>
+    <div class="site-card" onclick="window.open('${safeUrl}', '_blank')" data-site-index="${index}" data-category-id="${categoryId}">
       <div class="site-icon">${iconHtml}</div>
-      <div class="site-name">${site.name}</div>
-      <div class="site-desc">${site.description}</div>
+      <div class="site-name">${safeName}</div>
+      <div class="site-desc">${safeDesc}</div>
     </div>
   `;
 }
@@ -329,12 +386,13 @@ document.getElementById('searchInput')?.addEventListener('input', (e) => {
 // 渲染搜索结果
 function renderSearchResults(results, keyword) {
   const contentArea = document.getElementById('contentArea');
+  const safeKeyword = escapeHtml(keyword);
   
   if (results.length === 0) {
     contentArea.innerHTML = `
       <div class="empty-state">
         <span class="icon">🔍</span>
-        <span class="text">未找到 "${keyword}" 相关网站</span>
+        <span class="text">未找到 "${safeKeyword}" 相关网站</span>
       </div>
     `;
     return;
@@ -347,10 +405,10 @@ function renderSearchResults(results, keyword) {
     </h2>
     <div class="sites-grid ${currentIconSize === 'small' ? 'small-mode' : ''}">
       ${results.map(site => `
-        <div class="site-card" onclick="window.open('${site.url}', '_blank')">
+        <div class="site-card" onclick="window.open('${encodeURI(site.url)}', '_blank')">
           <div class="site-icon">${getIconHtml(site.icon)}</div>
-          <div class="site-name">${site.name}</div>
-          <div class="site-desc">${site.description}</div>
+          <div class="site-name">${escapeHtml(site.name)}</div>
+          <div class="site-desc">${escapeHtml(site.description)}</div>
         </div>
       `).join('')}
     </div>
@@ -441,7 +499,13 @@ async function saveSettings() {
 
 // 导出配置
 function exportConfig() {
-  const dataStr = JSON.stringify(sitesData, null, 2);
+  // 深拷贝并排除敏感信息
+  const exportData = JSON.parse(JSON.stringify(sitesData));
+  if (exportData.settings?.webdav) {
+    delete exportData.settings.webdav;
+  }
+  
+  const dataStr = JSON.stringify(exportData, null, 2);
   const blob = new Blob([dataStr], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -514,50 +578,6 @@ async function createBackup() {
   } catch (error) {
     alert('备份失败: ' + error.message);
   }
-}
-
-// 恢复备份
-async function restoreBackup(e) {
-  const file = e.target.files[0];
-  if (!file) return;
-  
-  if (!confirm('恢复备份将覆盖当前所有数据，是否继续？')) {
-    e.target.value = '';
-    return;
-  }
-  
-  try {
-    const text = await file.text();
-    const backupData = JSON.parse(text);
-    
-    const response = await fetch('/api/restore', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: text
-    });
-    
-    if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.error || '恢复失败');
-    }
-    
-    const result = await response.json();
-    
-    await loadSitesData();
-    applySettings();
-    renderNavMenu();
-    
-    if (sitesData.categories.length > 0) {
-      selectCategory(sitesData.categories[0].id);
-    }
-    
-    alert('恢复成功！');
-    closeSettingsModal();
-  } catch (error) {
-    alert('恢复失败: ' + error.message);
-  }
-  
-  e.target.value = '';
 }
 
 // ========== 分类管理 ==========
@@ -979,3 +999,249 @@ document.getElementById('siteUrl')?.addEventListener('blur', async function() {
     }
   }
 });
+
+// ========== 右键菜单功能 ==========
+
+// 初始化网站卡片右键菜单
+function initSiteContextMenu(card) {
+  card.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    
+    const categoryId = card.dataset.categoryId;
+    const siteIndex = parseInt(card.dataset.siteIndex);
+    
+    contextMenuTarget = { categoryId, siteIndex };
+    
+    const menu = document.getElementById('contextMenu');
+    menu.style.left = e.pageX + 'px';
+    menu.style.top = e.pageY + 'px';
+    menu.classList.add('show');
+  });
+}
+
+// 隐藏右键菜单
+function hideContextMenu() {
+  document.getElementById('contextMenu').classList.remove('show');
+}
+
+// 处理右键菜单操作
+function handleContextMenuAction(action) {
+  if (!contextMenuTarget) return;
+  
+  const { categoryId, siteIndex } = contextMenuTarget;
+  hideContextMenu();
+  
+  switch (action) {
+    case 'edit':
+      openSiteModal(categoryId, siteIndex);
+      break;
+    case 'move':
+      openMoveCategoryModal(categoryId, siteIndex);
+      break;
+    case 'delete':
+      deleteSite(categoryId, siteIndex);
+      break;
+  }
+}
+
+// ========== 移动网站到其他分类 ==========
+
+// 打开移动分类弹窗
+function openMoveCategoryModal(categoryId, siteIndex) {
+  const modal = document.getElementById('moveCategoryModal');
+  const select = document.getElementById('targetCategorySelect');
+  
+  // 填充分类选项
+  select.innerHTML = sitesData.categories
+    .filter(c => c.id !== categoryId)
+    .map(c => `<option value="${c.id}">${c.name}</option>`)
+    .join('');
+  
+  if (select.options.length === 0) {
+    alert('没有其他分类可移动');
+    return;
+  }
+  
+  contextMenuTarget = { categoryId, siteIndex };
+  modal.classList.add('show');
+}
+
+function closeMoveCategoryModal() {
+  document.getElementById('moveCategoryModal').classList.remove('show');
+}
+
+// 确认移动网站
+async function confirmMoveSite() {
+  if (!contextMenuTarget) return;
+  
+  const { categoryId, siteIndex } = contextMenuTarget;
+  const targetCategoryId = document.getElementById('targetCategorySelect').value;
+  
+  if (!targetCategoryId) {
+    alert('请选择目标分类');
+    return;
+  }
+  
+  try {
+    const response = await fetch(`/api/categories/${categoryId}/sites/${siteIndex}/move`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ targetCategoryId })
+    });
+    
+    if (!response.ok) throw new Error('移动失败');
+    
+    await loadSitesData();
+    renderNavMenu();
+    selectCategory(categoryId);
+    closeMoveCategoryModal();
+  } catch (error) {
+    alert('移动失败: ' + error.message);
+  }
+}
+
+// ========== WebDAV 备份功能 ==========
+
+// 初始化 WebDAV 定时备份
+function initWebdavBackup() {
+  if (backupTimer) {
+    clearInterval(backupTimer);
+    backupTimer = null;
+  }
+  
+  const webdav = sitesData.settings?.webdav;
+  if (webdav && webdav.interval > 0) {
+    backupTimer = setInterval(() => {
+      autoBackup();
+    }, webdav.interval * 60 * 1000);
+  }
+}
+
+// 打开 WebDAV 设置弹窗
+function openWebdavModal() {
+  const modal = document.getElementById('webdavModal');
+  const webdav = sitesData.settings?.webdav || {};
+  
+  document.getElementById('webdavUrl').value = webdav.url || '';
+  document.getElementById('webdavUsername').value = webdav.username || '';
+  document.getElementById('webdavPassword').value = webdav.password || '';
+  document.getElementById('webdavPath').value = webdav.path || '/itab-backup/';
+  document.getElementById('backupInterval').value = webdav.interval || 0;
+  
+  updateBackupStatus();
+  modal.classList.add('show');
+}
+
+function closeWebdavModal() {
+  document.getElementById('webdavModal').classList.remove('show');
+}
+
+// 更新备份状态显示
+function updateBackupStatus() {
+  const statusEl = document.getElementById('backupStatus');
+  const webdav = sitesData.settings?.webdav;
+  
+  if (!webdav || !webdav.url) {
+    statusEl.innerHTML = '<span style="color:#999;">未配置</span>';
+    return;
+  }
+  
+  const lastBackup = webdav.lastBackup;
+  if (lastBackup) {
+    const date = new Date(lastBackup);
+    statusEl.innerHTML = `<span style="color:#4caf50;">✓ 上次备份: ${date.toLocaleString()}</span>`;
+  } else {
+    statusEl.innerHTML = '<span style="color:#ff9800;">已配置，等待备份</span>';
+  }
+}
+
+// 保存 WebDAV 设置
+async function saveWebdavSettings() {
+  const webdav = {
+    url: document.getElementById('webdavUrl').value.trim(),
+    username: document.getElementById('webdavUsername').value.trim(),
+    password: document.getElementById('webdavPassword').value,
+    path: document.getElementById('webdavPath').value.trim() || '/itab-backup/',
+    interval: parseInt(document.getElementById('backupInterval').value)
+  };
+  
+  try {
+    const response = await fetch('/api/settings', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ webdav })
+    });
+    
+    if (!response.ok) throw new Error('保存失败');
+    
+    await loadSitesData();
+    initWebdavBackup();
+    updateBackupStatus();
+    closeWebdavModal();
+    alert('WebDAV 设置已保存');
+  } catch (error) {
+    alert('保存失败: ' + error.message);
+  }
+}
+
+// 测试 WebDAV 连接
+async function testWebdavConnection() {
+  const webdav = {
+    url: document.getElementById('webdavUrl').value.trim(),
+    username: document.getElementById('webdavUsername').value.trim(),
+    password: document.getElementById('webdavPassword').value,
+    path: document.getElementById('webdavPath').value.trim() || '/itab-backup/'
+  };
+  
+  if (!webdav.url) {
+    alert('请输入 WebDAV 服务器地址');
+    return;
+  }
+  
+  try {
+    const response = await fetch('/api/webdav/test', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(webdav)
+    });
+    
+    const result = await response.json();
+    
+    if (result.success) {
+      alert('✓ 连接成功！');
+    } else {
+      alert('✗ 连接失败: ' + (result.error || '未知错误'));
+    }
+  } catch (error) {
+    alert('连接测试失败: ' + error.message);
+  }
+}
+
+// 手动备份
+async function manualBackup() {
+  try {
+    const response = await fetch('/api/webdav/backup', { method: 'POST' });
+    const result = await response.json();
+    
+    if (result.success) {
+      await loadSitesData();
+      updateBackupStatus();
+      alert('备份成功！');
+    } else {
+      alert('备份失败: ' + (result.error || '未知错误'));
+    }
+  } catch (error) {
+    alert('备份失败: ' + error.message);
+  }
+}
+
+// 自动备份（静默执行）
+async function autoBackup() {
+  try {
+    await fetch('/api/webdav/backup', { method: 'POST' });
+    await loadSitesData();
+  } catch (error) {
+    console.error('自动备份失败:', error);
+  }
+}
