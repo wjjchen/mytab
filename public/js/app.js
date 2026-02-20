@@ -112,17 +112,21 @@ async function loadSitesData() {
 
 // 应用设置
 function applySettings() {
-  const settings = sitesData.settings || { background: '', iconSize: 'normal', logoIcon: '🚀', logoText: 'iTab', textColor: '#ffffff' };
+  const settings = sitesData.settings || { background: '', bgColor: '#667eea', iconSize: 'normal', logoIcon: '🚀', logoText: 'iTab', textColor: '#ffffff' };
   
   // 应用背景
   const bgLayer = document.getElementById('bgLayer');
+  const bgColor = settings.bgColor || '#667eea';
+  
   if (settings.background) {
     bgLayer.classList.add('custom-bg');
     bgLayer.style.backgroundImage = `url(${settings.background})`;
+    bgLayer.style.background = `url(${settings.background}) center/cover fixed`;
     document.getElementById('backgroundUrl').value = settings.background;
   } else {
     bgLayer.classList.remove('custom-bg');
     bgLayer.style.backgroundImage = '';
+    bgLayer.style.background = `linear-gradient(135deg, ${bgColor} 0%, ${adjustColor(bgColor, -20)} 100%)`;
   }
   
   // 应用Logo和标题
@@ -439,7 +443,7 @@ function renderSearchResults(results, keyword) {
 
 function openSettingsModal() {
   const modal = document.getElementById('settingsModal');
-  const settings = sitesData.settings || { background: '', iconSize: 'normal', logoIcon: '🚀', logoText: 'iTab', textColor: '#ffffff' };
+  const settings = sitesData.settings || { background: '', bgColor: '#667eea', iconSize: 'normal', logoIcon: '🚀', logoText: 'iTab', textColor: '#ffffff' };
   
   document.getElementById('backgroundUrl').value = settings.background || '';
   document.getElementById('logoIconInput').value = settings.logoIcon || '🚀';
@@ -457,13 +461,68 @@ function openSettingsModal() {
   textColorPicker.removeEventListener('input', handleColorPickerChange);
   textColorPicker.addEventListener('input', handleColorPickerChange);
   
-  // 绑定预设颜色按钮事件
-  document.querySelectorAll('.color-preset-btn').forEach(btn => {
+  // 绑定预设颜色按钮事件（文字颜色）
+  document.querySelectorAll('.color-preset-btn:not(.bg-color-preset)').forEach(btn => {
     btn.removeEventListener('click', handleColorPresetClick);
     btn.addEventListener('click', handleColorPresetClick);
   });
   
+  // 初始化背景颜色选择器
+  const bgColorPicker = document.getElementById('bgColorPicker');
+  bgColorPicker.value = settings.bgColor || '#667eea';
+  updateBgColorPresetButtons(settings.bgColor || '#667eea');
+  
+  bgColorPicker.removeEventListener('input', handleBgColorPickerChange);
+  bgColorPicker.addEventListener('input', handleBgColorPickerChange);
+  
+  // 绑定背景颜色预设按钮事件
+  document.querySelectorAll('.bg-color-preset').forEach(btn => {
+    btn.removeEventListener('click', handleBgColorPresetClick);
+    btn.addEventListener('click', handleBgColorPresetClick);
+  });
+  
   modal.classList.add('show');
+}
+
+// 调整颜色亮度
+function adjustColor(color, amount) {
+  const hex = color.replace('#', '');
+  const num = parseInt(hex, 16);
+  let r = (num >> 16) + amount;
+  let g = ((num >> 8) & 0x00FF) + amount;
+  let b = (num & 0x0000FF) + amount;
+  
+  r = Math.max(0, Math.min(255, r));
+  g = Math.max(0, Math.min(255, g));
+  b = Math.max(0, Math.min(255, b));
+  
+  return '#' + (0x1000000 + r * 0x10000 + g * 0x100 + b).toString(16).slice(1);
+}
+
+// 背景颜色选择器变化处理
+function handleBgColorPickerChange(e) {
+  updateBgColorPresetButtons(e.target.value);
+}
+
+// 背景颜色预设按钮点击处理
+function handleBgColorPresetClick(e) {
+  const color = e.target.dataset.color;
+  document.getElementById('bgColorPicker').value = color;
+  updateBgColorPresetButtons(color);
+  // 预览背景颜色
+  const bgLayer = document.getElementById('bgLayer');
+  bgLayer.style.background = `linear-gradient(135deg, ${color} 0%, ${adjustColor(color, -20)} 100%)`;
+}
+
+// 更新背景颜色预设按钮状态
+function updateBgColorPresetButtons(activeColor) {
+  document.querySelectorAll('.bg-color-preset').forEach(btn => {
+    if (btn.dataset.color === activeColor) {
+      btn.classList.add('active');
+    } else {
+      btn.classList.remove('active');
+    }
+  });
 }
 
 // 颜色选择器变化处理
@@ -480,7 +539,7 @@ function handleColorPresetClick(e) {
 
 // 更新预设颜色按钮状态
 function updateColorPresetButtons(activeColor) {
-  document.querySelectorAll('.color-preset-btn').forEach(btn => {
+  document.querySelectorAll('.color-preset-btn:not(.bg-color-preset)').forEach(btn => {
     if (btn.dataset.color === activeColor) {
       btn.classList.add('active');
     } else {
@@ -495,6 +554,7 @@ function closeSettingsModal() {
 
 async function saveSettings() {
   const background = document.getElementById('backgroundUrl').value.trim();
+  const bgColor = document.getElementById('bgColorPicker').value || '#667eea';
   const iconSize = document.querySelector('input[name="iconSize"]:checked').value;
   const logoIcon = document.getElementById('logoIconInput').value.trim() || '🚀';
   const logoText = document.getElementById('logoTextInput').value.trim() || 'iTab';
@@ -504,7 +564,7 @@ async function saveSettings() {
     const response = await fetch('/api/settings', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ background, iconSize, logoIcon, logoText, textColor })
+      body: JSON.stringify({ background, bgColor, iconSize, logoIcon, logoText, textColor })
     });
     
     if (!response.ok) throw new Error('保存失败');

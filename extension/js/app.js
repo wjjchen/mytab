@@ -33,6 +33,7 @@ function escapeHtml(text) {
 const DEFAULT_DATA = {
   settings: {
     background: '',
+    bgColor: '#667eea',
     iconSize: 'normal',
     logoIcon: '🚀',
     logoText: 'iTab',
@@ -161,13 +162,17 @@ function applySettings() {
   
   // 应用背景
   const bgLayer = document.getElementById('bgLayer');
+  const bgColor = settings.bgColor || '#667eea';
+  
   if (settings.background) {
     bgLayer.classList.add('custom-bg');
     bgLayer.style.backgroundImage = `url(${settings.background})`;
+    bgLayer.style.background = `url(${settings.background}) center/cover fixed`;
     document.getElementById('backgroundUrl').value = settings.background;
   } else {
     bgLayer.classList.remove('custom-bg');
     bgLayer.style.backgroundImage = '';
+    bgLayer.style.background = `linear-gradient(135deg, ${bgColor} 0%, ${adjustColor(bgColor, -20)} 100%)`;
   }
   
   // 应用Logo和标题
@@ -558,7 +563,7 @@ function openSettingsModal() {
   updateColorPresetButtons(settings.textColor || '#ffffff');
   
   textColorPicker.addEventListener('input', (e) => updateColorPresetButtons(e.target.value));
-  document.querySelectorAll('.color-preset-btn').forEach(btn => {
+  document.querySelectorAll('.color-preset-btn:not(.bg-color-preset)').forEach(btn => {
     btn.addEventListener('click', (e) => {
       const color = e.target.dataset.color;
       document.getElementById('textColorPicker').value = color;
@@ -566,11 +571,49 @@ function openSettingsModal() {
     });
   });
   
+  // 背景颜色选择器
+  const bgColorPicker = document.getElementById('bgColorPicker');
+  bgColorPicker.value = settings.bgColor || '#667eea';
+  updateBgColorPresetButtons(settings.bgColor || '#667eea');
+  
+  bgColorPicker.addEventListener('input', (e) => updateBgColorPresetButtons(e.target.value));
+  document.querySelectorAll('.bg-color-preset').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      const color = e.target.dataset.color;
+      document.getElementById('bgColorPicker').value = color;
+      updateBgColorPresetButtons(color);
+      // 预览背景颜色
+      const bgLayer = document.getElementById('bgLayer');
+      bgLayer.style.background = `linear-gradient(135deg, ${color} 0%, ${adjustColor(color, -20)} 100%)`;
+    });
+  });
+  
   modal.classList.add('show');
 }
 
+// 调整颜色亮度
+function adjustColor(color, amount) {
+  const hex = color.replace('#', '');
+  const num = parseInt(hex, 16);
+  let r = (num >> 16) + amount;
+  let g = ((num >> 8) & 0x00FF) + amount;
+  let b = (num & 0x0000FF) + amount;
+  
+  r = Math.max(0, Math.min(255, r));
+  g = Math.max(0, Math.min(255, g));
+  b = Math.max(0, Math.min(255, b));
+  
+  return '#' + (0x1000000 + r * 0x10000 + g * 0x100 + b).toString(16).slice(1);
+}
+
+function updateBgColorPresetButtons(activeColor) {
+  document.querySelectorAll('.bg-color-preset').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.color === activeColor);
+  });
+}
+
 function updateColorPresetButtons(activeColor) {
-  document.querySelectorAll('.color-preset-btn').forEach(btn => {
+  document.querySelectorAll('.color-preset-btn:not(.bg-color-preset)').forEach(btn => {
     btn.classList.toggle('active', btn.dataset.color === activeColor);
   });
 }
@@ -581,6 +624,7 @@ function closeSettingsModal() {
 
 async function saveSettings() {
   const background = document.getElementById('backgroundUrl').value.trim();
+  const bgColor = document.getElementById('bgColorPicker').value || '#667eea';
   const iconSize = document.querySelector('input[name="iconSize"]:checked').value;
   const logoIcon = document.getElementById('logoIconInput').value.trim() || '🚀';
   const logoText = document.getElementById('logoTextInput').value.trim() || 'iTab';
@@ -589,6 +633,7 @@ async function saveSettings() {
   sitesData.settings = {
     ...sitesData.settings,
     background,
+    bgColor,
     iconSize,
     logoIcon,
     logoText,
