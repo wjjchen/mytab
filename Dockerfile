@@ -13,7 +13,7 @@ RUN npm ci --only=production
 # 复制应用代码
 COPY server.js ./
 COPY public ./public
-COPY data ./data
+
 
 # 创建数据目录（用于数据持久化）
 RUN mkdir -p /app/data
