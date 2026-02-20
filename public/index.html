@@ -119,13 +119,11 @@
           </div>
         </div>
         <div class="form-group">
-          <label>数据备份与恢复</label>
+          <label>WebDAV 云备份</label>
           <div class="btn-group">
-            <button class="btn btn-secondary" id="backupBtn">💾 创建备份</button>
-            <button class="btn btn-secondary" id="restoreBtn">🔄 恢复备份</button>
-            <input type="file" id="restoreFile" accept=".json" style="display:none">
+            <button class="btn btn-secondary" id="webdavSettingsBtn">☁️ 配置云备份</button>
           </div>
-          <small class="form-hint">备份包含完整数据和设置，恢复会覆盖当前数据</small>
+          <small class="form-hint">支持坚果云、Nextcloud 等 WebDAV 服务</small>
         </div>
       </div>
       <div class="modal-footer">
@@ -205,6 +203,99 @@
       <div class="modal-footer">
         <button class="btn btn-secondary" onclick="closeDeleteModal()">取消</button>
         <button class="btn btn-danger" id="confirmDeleteBtn">删除</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 右键菜单 -->
+  <div class="context-menu" id="contextMenu">
+    <div class="context-menu-item" id="menuEditSite">
+      <span>✏️</span>
+      <span>编辑网站</span>
+    </div>
+    <div class="context-menu-item" id="menuMoveCategory">
+      <span>📁</span>
+      <span>移动到分类</span>
+    </div>
+    <div class="context-menu-divider"></div>
+    <div class="context-menu-item danger" id="menuDeleteSite">
+      <span>🗑️</span>
+      <span>删除网站</span>
+    </div>
+  </div>
+
+  <!-- 移动分类选择弹窗 -->
+  <div class="modal" id="moveCategoryModal">
+    <div class="modal-content modal-small">
+      <div class="modal-header">
+        <h3>移动到分类</h3>
+        <button class="modal-close" onclick="closeMoveCategoryModal()">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label>选择目标分类</label>
+          <select id="targetCategorySelect" style="width:100%;padding:10px;border:1px solid #ddd;border-radius:8px;font-size:14px;">
+          </select>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="closeMoveCategoryModal()">取消</button>
+        <button class="btn btn-primary" id="confirmMoveBtn">移动</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- WebDAV备份设置弹窗 -->
+  <div class="modal" id="webdavModal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>WebDAV 备份设置</h3>
+        <button class="modal-close" onclick="closeWebdavModal()">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label>WebDAV 服务器地址</label>
+          <input type="url" id="webdavUrl" placeholder="https://dav.example.com/">
+          <small class="form-hint">例如: https://dav.jianguoyun.com/dav/</small>
+        </div>
+        <div class="form-group">
+          <label>用户名</label>
+          <input type="text" id="webdavUsername" placeholder="WebDAV 用户名">
+        </div>
+        <div class="form-group">
+          <label>密码/应用密码</label>
+          <input type="password" id="webdavPassword" placeholder="WebDAV 密码">
+          <small class="form-hint">坚果云等平台需要使用应用密码</small>
+        </div>
+        <div class="form-group">
+          <label>备份目录</label>
+          <input type="text" id="webdavPath" placeholder="/itab-backup/">
+          <small class="form-hint">备份文件保存的目录路径</small>
+        </div>
+        <div class="form-group">
+          <label>自动备份间隔</label>
+          <select id="backupInterval" style="width:100%;padding:10px;border:1px solid #ddd;border-radius:8px;font-size:14px;">
+            <option value="0">关闭自动备份</option>
+            <option value="5">每 5 分钟</option>
+            <option value="15">每 15 分钟</option>
+            <option value="30">每 30 分钟</option>
+            <option value="60">每 1 小时</option>
+            <option value="360">每 6 小时</option>
+            <option value="1440">每 24 小时</option>
+          </select>
+        </div>
+        <div class="settings-divider"></div>
+        <div class="form-group">
+          <label>备份状态</label>
+          <div id="backupStatus" style="font-size:14px;color:#666;">
+            未配置
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="testWebdavConnection()">测试连接</button>
+        <button class="btn btn-secondary" onclick="manualBackup()">立即备份</button>
+        <button class="btn btn-primary" id="saveWebdavBtn">保存设置</button>
       </div>
     </div>
   </div>
