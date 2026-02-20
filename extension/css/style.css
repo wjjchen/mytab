@@ -552,37 +552,37 @@ body {
 }
 
 .sites-grid.small-mode .site-card .site-icon {
-  width: 44px;
-  height: 44px;
+  width: 60px;
+  height: 60px;
   margin-bottom: 8px;
-  font-size: 24px;
+  font-size: 60px;
   background: rgba(255, 255, 255, 0.2);
 }
 
 .sites-grid.small-mode .site-card .site-icon img {
-  width: 28px;
-  height: 28px;
+  width: 60px;
+  height: 60px;
 }
 
 /* 网站卡片操作按钮已移除，改为右键菜单 */
 
 .site-icon {
-  width: 50px;
-  height: 50px;
-  border-radius: 12px;
+  width: 60px;
+  height: 60px;
+  border-radius: 14px;
   margin-bottom: 12px;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 28px;
+  font-size: 60px;
   background: rgba(255, 255, 255, 0.15);
   overflow: hidden;
   flex-shrink: 0;
 }
 
 .site-icon img {
-  width: 32px;
-  height: 32px;
+  width: 60px;
+  height: 60px;
   object-fit: contain;
 }
 
