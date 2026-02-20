@@ -1,0 +1,28 @@
+version: '3.8'
+
+services:
+  itab:
+    build: .
+    image: itab:latest
+    container_name: itab
+    restart: unless-stopped
+    ports:
+      - "3001:3001"
+    volumes:
+      # 数据持久化：将本地 data 目录挂载到容器
+      - ./data:/app/data
+    environment:
+      - NODE_ENV=production
+      - PORT=3001
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3001/"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+
+# 可选：使用外部网络
+# networks:
+#   default:
+#     external:
+#       name: my-network
