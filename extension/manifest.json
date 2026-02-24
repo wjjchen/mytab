@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "iTab - 网址导航",
+  "name": "myTab - 网址导航",
   "version": "1.0.0",
   "description": "个人网址导航新标签页",
   "permissions": [

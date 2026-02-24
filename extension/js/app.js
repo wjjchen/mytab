@@ -975,6 +975,66 @@ async function ensureWebdavDirectory(credentials) {
   }
 }
 
+// 列出 WebDAV 目录中的配置文件并返回最新的
+async function listWebdavFiles(credentials) {
+  const dirPath = credentials.path.replace(/^\/+/, '').replace(/\/+$/, '');
+  const dirUrl = credentials.url + dirPath + '/';
+  
+  const response = await fetch(dirUrl, {
+    method: 'PROPFIND',
+    headers: {
+      'Authorization': 'Basic ' + btoa(credentials.username + ':' + credentials.password),
+      'Depth': '1',
+      'Content-Type': 'application/xml'
+    },
+    body: '<?xml version="1.0" encoding="utf-8"?><propfind xmlns="DAV:"><prop><getlastmodified/></prop></propfind>'
+  });
+  
+  if (!response.ok && response.status !== 207) {
+    throw new Error(`无法列出目录: ${response.status}`);
+  }
+  
+  const text = await response.text();
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(text, 'application/xml');
+  
+  // 尝试使用命名空间和非命名空间两种方式查找 response 元素
+  let responses = doc.getElementsByTagNameNS('DAV:', 'response');
+  if (responses.length === 0) {
+    responses = doc.getElementsByTagName('response');
+  }
+  
+  const files = [];
+  
+  for (const resp of responses) {
+    // 尝试多种方式获取 href
+    let href = resp.getElementsByTagNameNS('DAV:', 'href')[0]?.textContent;
+    if (!href) {
+      href = resp.getElementsByTagName('href')[0]?.textContent || '';
+    }
+    
+    // 尝试多种方式获取修改时间
+    let lastModified = resp.getElementsByTagNameNS('DAV:', 'getlastmodified')[0]?.textContent;
+    if (!lastModified) {
+      lastModified = resp.getElementsByTagName('getlastmodified')[0]?.textContent;
+    }
+    
+    // 只匹配配置文件 (itab-config-xxx.json 或 itab-config.json)
+    const fileName = decodeURIComponent(href.split('/').pop() || '');
+    if (fileName.match(/^itab-config(-[\d-T]+)?\.json$/)) {
+      files.push({
+        href: href,
+        fileName: fileName,
+        lastModified: lastModified ? new Date(lastModified).getTime() : 0
+      });
+    }
+  }
+  
+  // 按修改时间降序排序，返回最新的
+  files.sort((a, b) => b.lastModified - a.lastModified);
+  return files;
+}
+
 // 从 WebDAV 下载配置
 async function downloadFromWebdav() {
   const credentials = await getWebdavCredentials();
@@ -985,11 +1045,22 @@ async function downloadFromWebdav() {
   }
   
   const statusEl = document.getElementById('webdavStatus');
-  statusEl.innerHTML = '<span style="color:#667eea;">正在下载配置...</span>';
+  statusEl.innerHTML = '<span style="color:#667eea;">正在查找最新配置...</span>';
   
   try {
-    const configPath = credentials.path + 'itab-config.json';
-    const configUrl = credentials.url + configPath.replace(/^\/+/, '');
+    // 列出目录中的配置文件
+    const files = await listWebdavFiles(credentials);
+    
+    if (files.length === 0) {
+      statusEl.innerHTML = '<span style="color:#e74c3c;">✗ 远程配置文件不存在，请先上传</span>';
+      return;
+    }
+    
+    // 获取最新的配置文件
+    const latestFile = files[0];
+    const configUrl = credentials.url + latestFile.href.replace(/^\/+/, '');
+    
+    statusEl.innerHTML = `<span style="color:#667eea;">正在下载: ${latestFile.fileName}...</span>`;
     
     const response = await fetch(configUrl, {
       method: 'GET',
@@ -1021,7 +1092,7 @@ async function downloadFromWebdav() {
         selectCategory(sitesData.categories[0].id);
       }
       
-      statusEl.innerHTML = '<span style="color:#00b894;">✓ 下载成功</span>';
+      statusEl.innerHTML = `<span style="color:#00b894;">✓ 下载成功 (${latestFile.fileName})</span>`;
       updateWebdavStatus();
     } else if (response.status === 404) {
       statusEl.innerHTML = '<span style="color:#e74c3c;">✗ 远程配置文件不存在，请先上传</span>';
