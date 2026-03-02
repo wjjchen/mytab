@@ -20,6 +20,7 @@ let backupTimer = null;
 document.addEventListener('DOMContentLoaded', async () => {
   await loadSitesData();
   applySettings();
+  initSearchEngine();
   renderNavMenu();
   updateTime();
   setInterval(updateTime, 1000); // 每秒更新时间
@@ -362,9 +363,91 @@ function createSiteCard(site, categoryId, index) {
   `;
 }
 
-// 搜索功能
-document.getElementById('searchInput')?.addEventListener('input', (e) => {
-  const keyword = e.target.value.toLowerCase().trim();
+
+// 搜索引擎配置
+const SEARCH_ENGINES = {
+  baidu: 'https://www.baidu.com/s?wd=',
+  google: 'https://www.google.com/search?q=',
+  bing: 'https://www.bing.com/search?q='
+};
+
+const SEARCH_ENGINE_PLACEHOLDERS = {
+  baidu: '百度搜索...',
+  google: 'Google 搜索...',
+  bing: 'Bing 搜索...'
+};
+
+const SITE_SEARCH_PLACEHOLDER = '搜索收藏的网站... (Ctrl+F)';
+
+let currentSearchEngine = 'baidu';
+let isSiteSearchMode = false; // 站内搜索模式
+
+// 初始化搜索引擎（从存储中恢复）
+async function initSearchEngine() {
+  const savedEngine = sitesData.settings?.searchEngine || 'baidu';
+  currentSearchEngine = savedEngine;
+  
+  const select = document.getElementById('searchEngineSelect');
+  const searchInput = document.getElementById('searchInput');
+  
+  if (select) {
+    // 更新自定义下拉组件显示
+    const selectedDiv = select.querySelector('.select-selected');
+    const options = select.querySelectorAll('.select-option');
+    
+    if (selectedDiv) {
+      selectedDiv.dataset.value = savedEngine;
+      selectedDiv.textContent = savedEngine === 'google' ? '谷歌' : (savedEngine === 'bing' ? 'Bing' : '百度');
+    }
+    
+    options.forEach(opt => {
+      opt.classList.toggle('selected', opt.dataset.value === savedEngine);
+    });
+  }
+  if (searchInput) {
+    searchInput.placeholder = SEARCH_ENGINE_PLACEHOLDERS[savedEngine];
+  }
+}
+
+// 切换到站内搜索模式
+function enterSiteSearchMode() {
+  isSiteSearchMode = true;
+  const searchInput = document.getElementById('searchInput');
+  const customSelect = document.getElementById('searchEngineSelect');
+  
+  if (searchInput) {
+    searchInput.placeholder = SITE_SEARCH_PLACEHOLDER;
+    searchInput.focus();
+  }
+  
+  // 隐藏搜索引擎选择器
+  if (customSelect) {
+    customSelect.style.display = 'none';
+  }
+}
+
+// 退出站内搜索模式
+function exitSiteSearchMode() {
+  isSiteSearchMode = false;
+  const searchInput = document.getElementById('searchInput');
+  const customSelect = document.getElementById('searchEngineSelect');
+  
+  if (searchInput) {
+    searchInput.placeholder = SEARCH_ENGINE_PLACEHOLDERS[currentSearchEngine];
+  }
+  
+  // 显示搜索引擎选择器
+  if (customSelect) {
+    customSelect.style.display = '';
+  }
+}
+
+// 站内搜索功能
+function searchSites(keyword) {
+  if (!sitesData || !sitesData.categories) {
+    console.warn('网站数据未加载');
+    return;
+  }
   
   if (!keyword) {
     if (currentCategory) {
@@ -391,7 +474,7 @@ document.getElementById('searchInput')?.addEventListener('input', (e) => {
   });
   
   renderSearchResults(results, keyword);
-});
+}
 
 // 渲染搜索结果
 function renderSearchResults(results, keyword) {
@@ -426,7 +509,6 @@ function renderSearchResults(results, keyword) {
   
   // 绑定搜索结果点击事件和右键菜单
   document.querySelectorAll('.site-card.search-result').forEach(card => {
-    // 点击打开网站
     card.addEventListener('click', () => {
       const url = card.dataset.url;
       if (url) {
@@ -434,10 +516,130 @@ function renderSearchResults(results, keyword) {
       }
     });
     
-    // 右键菜单
     initSiteContextMenu(card);
   });
 }
+
+// 快捷键监听
+document.addEventListener('keydown', (e) => {
+  // Ctrl+F (Windows) 或 Cmd+F (macOS)
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f') {
+    e.preventDefault();
+    enterSiteSearchMode();
+  }
+  
+  // ESC 退出站内搜索模式
+  if (e.key === 'Escape' && isSiteSearchMode) {
+    exitSiteSearchMode();
+    const searchInput = document.getElementById('searchInput');
+    if (searchInput) {
+      searchInput.value = '';
+    }
+    if (currentCategory) {
+      renderSites(currentCategory);
+    }
+  }
+});
+
+// 自定义下拉组件交互
+document.addEventListener('DOMContentLoaded', () => {
+  const customSelect = document.getElementById('searchEngineSelect');
+  
+  if (customSelect) {
+    const selectedDiv = customSelect.querySelector('.select-selected');
+    const options = customSelect.querySelectorAll('.select-option');
+    
+    // 点击展开/收起下拉菜单
+    selectedDiv?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      customSelect.classList.toggle('open');
+    });
+    
+    // 点击选项
+    options.forEach(option => {
+      option.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const value = option.dataset.value;
+        currentSearchEngine = value;
+        
+        // 更新显示
+        selectedDiv.dataset.value = value;
+        selectedDiv.textContent = option.textContent;
+        
+        // 更新选中状态
+        options.forEach(opt => opt.classList.remove('selected'));
+        option.classList.add('selected');
+        
+        // 关闭下拉菜单
+        customSelect.classList.remove('open');
+        
+        // 更新 placeholder
+        const searchInput = document.getElementById('searchInput');
+        if (searchInput) {
+          searchInput.placeholder = SEARCH_ENGINE_PLACEHOLDERS[value];
+          searchInput.focus();
+        }
+        
+        
+        // 保存到设置
+        try {
+          await fetch('/api/settings', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ searchEngine: value })
+          });
+        } catch (error) {
+          console.error('保存搜索引擎设置失败:', error);
+        }
+      });
+    });
+  }
+  
+  // 点击其他地方关闭下拉菜单
+  document.addEventListener('click', () => {
+    document.querySelectorAll('.custom-select.open').forEach(el => {
+      el.classList.remove('open');
+    });
+  });
+});
+
+// 搜索功能
+document.getElementById('searchInput')?.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') {
+    const keyword = e.target.value.trim();
+    if (keyword) {
+      if (isSiteSearchMode) {
+        // 站内搜索模式：搜索收藏的网站
+        searchSites(keyword.toLowerCase());
+      } else {
+        // 网络搜索模式：使用搜索引擎
+        const searchUrl = SEARCH_ENGINES[currentSearchEngine] + encodeURIComponent(keyword);
+        window.open(searchUrl, '_blank');
+      }
+    }
+  }
+});
+
+// 输入时实时站内搜索
+document.getElementById('searchInput')?.addEventListener('input', (e) => {
+  if (isSiteSearchMode) {
+    const keyword = e.target.value.toLowerCase().trim();
+    searchSites(keyword);
+  }
+});
+
+// 搜索按钮点击
+document.querySelector('.search-btn')?.addEventListener('click', () => {
+  const keyword = document.getElementById('searchInput')?.value.trim();
+  if (keyword) {
+    if (isSiteSearchMode) {
+      searchSites(keyword.toLowerCase());
+    } else {
+      const searchUrl = SEARCH_ENGINES[currentSearchEngine] + encodeURIComponent(keyword);
+      window.open(searchUrl, '_blank');
+    }
+  }
+});
 
 // ========== 设置管理 ==========
 
@@ -571,6 +773,7 @@ async function saveSettings() {
     
     await loadSitesData();
     applySettings();
+  initSearchEngine();
     closeSettingsModal();
   } catch (error) {
     alert('保存设置失败: ' + error.message);
@@ -620,6 +823,7 @@ async function importConfig(e) {
     
     await loadSitesData();
     applySettings();
+  initSearchEngine();
     renderNavMenu();
     
     if (sitesData.categories.length > 0) {

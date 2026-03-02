@@ -43,7 +43,17 @@
 
       <header class="header">
         <div class="search-box">
-          <input type="text" id="searchInput" placeholder="搜索网站..." autocomplete="off">
+          <div class="search-engine-selector">
+            <div class="custom-select" id="searchEngineSelect">
+              <div class="select-selected" data-value="baidu">百度</div>
+              <div class="select-options">
+                <div class="select-option selected" data-value="baidu">百度</div>
+                <div class="select-option" data-value="google">谷歌</div>
+                <div class="select-option" data-value="bing">Bing</div>
+              </div>
+            </div>
+          </div>
+          <input type="text" id="searchInput" placeholder="百度搜索..." autocomplete="off">
           <button class="search-btn">🔍</button>
         </div>
       </header>
