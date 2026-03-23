@@ -34,7 +34,7 @@ function sanitizeObject(obj) {
     const sanitized = {};
     for (const key in obj) {
       // 排除不需要转义的字段（如 URL）
-      if (key === 'url' || key === 'background' || key === 'icon') {
+      if (key === 'url' || key === 'background' || key === 'icon' || key === 'labelBgColor') {
         // 对 URL 字段只进行基本验证，不转义
         sanitized[key] = obj[key];
       } else {
@@ -341,7 +341,7 @@ app.delete('/api/categories/:id', (req, res) => {
 app.post('/api/categories/:categoryId/sites', (req, res) => {
   const data = readData();
   const { categoryId } = req.params;
-  const { name, url, icon, description } = req.body;
+  const { name, url, icon, description, labelText, labelBgColor } = req.body;
   
   if (!name || !url) {
     return res.status(400).json({ error: '网站名称和URL不能为空' });
@@ -356,7 +356,9 @@ app.post('/api/categories/:categoryId/sites', (req, res) => {
     name,
     url,
     icon: icon || '🌐',
-    description: description || ''
+    description: description || '',
+    labelText: labelText || '',
+    labelBgColor: labelBgColor || ''
   };
   
   category.sites.push(newSite);
@@ -423,7 +425,7 @@ app.put('/api/categories/:categoryId/sites/reorder-full', (req, res) => {
 app.put('/api/categories/:categoryId/sites/:siteIndex', (req, res) => {
   const data = readData();
   const { categoryId, siteIndex } = req.params;
-  const { name, url, icon, description } = req.body;
+  const { name, url, icon, description, labelText, labelBgColor } = req.body;
   
   const category = data.categories.find(c => c.id === categoryId);
   if (!category) {
@@ -439,6 +441,8 @@ app.put('/api/categories/:categoryId/sites/:siteIndex', (req, res) => {
   if (url) site.url = url;
   if (icon) site.icon = icon;
   if (description !== undefined) site.description = description;
+  if (labelText !== undefined) site.labelText = labelText;
+  if (labelBgColor !== undefined) site.labelBgColor = labelBgColor;
   
   writeData(data);
   res.json(site);

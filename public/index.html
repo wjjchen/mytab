@@ -202,6 +202,15 @@
         <div class="form-group">
           <label>图标 (emoji 或 URL)</label>
           <input type="text" id="siteIcon" placeholder="🌐 或 https://...">
+          <small class="form-hint">留空且填写文本标签时，将优先显示文本标签</small>
+        </div>
+        <div class="form-group">
+          <label>文本标签 <small style="color:#999;font-weight:normal;">(优先于图标显示)</small></label>
+          <div style="display:flex;gap:8px;align-items:center;">
+            <input type="text" id="siteLabelText" placeholder="如：AI、工具、常用" style="flex:1;">
+            <input type="color" id="siteLabelBgColor" value="#667eea" title="标签背景色" style="width:40px;height:38px;padding:2px;border:1px solid #ddd;border-radius:6px;cursor:pointer;flex-shrink:0;">
+          </div>
+          <small class="form-hint">设置文本标签后将显示带背景色的文字块替代图标</small>
         </div>
         <div class="form-group">
           <label>网站描述</label>

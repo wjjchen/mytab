@@ -266,8 +266,13 @@ function renderNavMenu() {
   });
 }
 
-// 获取图标HTML
-function getIconHtml(icon) {
+// 获取图标HTML（支持文本标签）
+function getIconHtml(icon, labelText, labelBgColor) {
+  // 优先显示文本标签
+  if (labelText && labelText.trim()) {
+    const bg = labelBgColor || '#667eea';
+    return `<span class="site-text-label" style="background:${escapeHtml(bg)};">${escapeHtml(labelText.trim())}</span>`;
+  }
   if (!icon) return '🌐';
   if (icon.startsWith('http')) {
     return `<img src="${icon}" alt="" onerror="this.parentElement.innerHTML='🌐'">`;
@@ -348,7 +353,7 @@ function renderSites(categoryId) {
 
 // 创建网站卡片HTML
 function createSiteCard(site, categoryId, index) {
-  const iconHtml = getIconHtml(site.icon);
+  const iconHtml = getIconHtml(site.icon, site.labelText, site.labelBgColor);
   // XSS 防护 - 转义用户输入
   const safeName = escapeHtml(site.name);
   const safeDesc = escapeHtml(site.description);
@@ -499,7 +504,7 @@ function renderSearchResults(results, keyword) {
     <div class="sites-grid ${currentIconSize === 'small' ? 'small-mode' : ''}">
       ${results.map((site, idx) => `
         <div class="site-card search-result" data-url="${escapeHtml(site.url)}" data-category-id="${escapeHtml(site.categoryId)}" data-site-index="${site.siteIndex}">
-          <div class="site-icon">${getIconHtml(site.icon)}</div>
+          <div class="site-icon">${getIconHtml(site.icon, site.labelText, site.labelBgColor)}</div>
           <div class="site-name">${escapeHtml(site.name)}</div>
           <div class="site-desc">${escapeHtml(site.description)}</div>
         </div>
@@ -964,12 +969,16 @@ function openSiteModal(categoryId = null, siteIndex = null) {
     document.getElementById('siteUrl').value = site.url;
     document.getElementById('siteIcon').value = site.icon;
     document.getElementById('siteDesc').value = site.description;
+    document.getElementById('siteLabelText').value = site.labelText || '';
+    document.getElementById('siteLabelBgColor').value = site.labelBgColor || '#667eea';
   } else {
     title.textContent = '添加网站';
     document.getElementById('siteName').value = '';
     document.getElementById('siteUrl').value = '';
     document.getElementById('siteIcon').value = '🌐';
     document.getElementById('siteDesc').value = '';
+    document.getElementById('siteLabelText').value = '';
+    document.getElementById('siteLabelBgColor').value = '#667eea';
   }
   
   modal.classList.add('show');
@@ -986,6 +995,8 @@ async function saveSite() {
   const url = document.getElementById('siteUrl').value.trim();
   const icon = document.getElementById('siteIcon').value.trim() || '🌐';
   const description = document.getElementById('siteDesc').value.trim();
+  const labelText = document.getElementById('siteLabelText').value.trim();
+  const labelBgColor = document.getElementById('siteLabelBgColor').value || '#667eea';
   
   if (!name || !url) {
     alert('请输入网站名称和地址');
@@ -998,13 +1009,13 @@ async function saveSite() {
       response = await fetch(`/api/categories/${categoryId}/sites/${editingSiteIndex}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, url, icon, description })
+        body: JSON.stringify({ name, url, icon, description, labelText, labelBgColor })
       });
     } else {
       response = await fetch(`/api/categories/${categoryId}/sites`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, url, icon, description })
+        body: JSON.stringify({ name, url, icon, description, labelText, labelBgColor })
       });
     }
     
